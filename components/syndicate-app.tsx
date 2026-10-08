@@ -39,6 +39,7 @@ type UserData = {
   username: string
   initials: string
   avatarColor: string
+  photoUrl?: string // <-- ДОБАВИТЬ ЭТУ СТРОКУ
   dollars: number
   elo: number
   influence: number
@@ -66,10 +67,33 @@ const navItems = [
 
 type Tab = 'play' | 'top' | 'shop' | 'profile'
 
-function DynamicAvatar({ initials, color, size = 'md' }: { initials: string; color: string; size?: 'sm' | 'md' | 'lg' }) {
+function DynamicAvatar({
+  initials,
+  color,
+  photoUrl,
+  size = 'md',
+}: {
+  initials: string
+  color: string
+  photoUrl?: string
+  size?: 'sm' | 'md' | 'lg'
+}) {
   const sizes = { sm: 'size-8 text-[10px]', md: 'size-10 text-xs', lg: 'size-24 text-2xl' }
+
+  if (photoUrl) {
+    return (
+      <img
+        src={photoUrl}
+        alt="Avatar"
+        className={`shrink-0 rounded-full border border-white/15 object-cover shadow-lg ${sizes[size]}`}
+      />
+    )
+  }
+
   return (
-    <div className={`flex shrink-0 items-center justify-center rounded-full border border-white/15 bg-gradient-to-br font-bold text-white shadow-lg ${color} ${sizes[size]}`}>
+    <div
+      className={`flex shrink-0 items-center justify-center rounded-full border border-white/15 bg-gradient-to-br font-bold text-white shadow-lg ${color} ${sizes[size]}`}
+    >
       {initials}
     </div>
   )
@@ -306,7 +330,7 @@ function TableLobby({ user, table, onBack }: { user: UserData; table: (typeof ta
           { name: 'Nox', initials: 'NO', color: 'from-fuchsia-300 to-violet-700' },
         ].map((p) => (
           <div className="player-card" key={p.name}>
-            <DynamicAvatar initials={p.initials} color={p.color} size="sm" />
+            <DynamicAvatar initials={user.initials} color={user.avatarColor} photoUrl={user.photoUrl} size="sm" />
             <div>
               <p className="text-xs font-medium text-white">{p.name}</p>
               <p className="text-[10px] text-slate-500">Готов к игре</p>
@@ -324,7 +348,7 @@ function ProfileScreen({ user }: { user: UserData }) {
     <div className="page-content">
       <div className="profile-hero">
         <div className="flex items-center gap-4">
-          <DynamicAvatar initials={user.initials} color={user.avatarColor} size="lg" />
+          <DynamicAvatar initials={user.initials} color={user.avatarColor} photoUrl={user.photoUrl} size="lg" />
           <div>
             <p className="eyebrow text-blue-400">PLAYER PROFILE</p>
             <h2 className="mt-1 text-2xl font-semibold text-white">{user.name}</h2>
@@ -487,7 +511,7 @@ export default function SyndicateApp() {
     influence: 450,
   })
 
-  useEffect(() => {
+useEffect(() => {
     if (typeof window === 'undefined') return
 
     const tg = (window as any).Telegram?.WebApp
@@ -496,7 +520,7 @@ export default function SyndicateApp() {
       tg.ready()
       tg.expand()
 
-      // 1. Быстро достаем юзера прямо из Telegram WebApp SDK (работает мгновенно)
+      // 1. Быстро достаем юзера прямо из Telegram WebApp SDK (для мгновенного вывода имени)
       const tgUser = tg.initDataUnsafe?.user
 
       if (tgUser) {
@@ -508,19 +532,17 @@ export default function SyndicateApp() {
           .substring(0, 2)
           .toUpperCase() || 'PL'
 
-        setUser({
+        setUser((prev) => ({
+          ...prev,
           id: tgUser.id,
           name: fullName,
           username: tgUser.username ? `@${tgUser.username}` : '@no_username',
           initials: initials,
           avatarColor: defaultAvatarColors[Math.abs(tgUser.id) % defaultAvatarColors.length],
-          dollars: 15000,
-          elo: 1200,
-          influence: 450,
-        })
+        }))
       }
 
-      // 2. Параллельно отправляем initData на бэкенд для серверной проверки HMAC
+      // 2. Отправляем initData на бэкенд: валидируем подпись и получаем реальное фото через Bot API
       if (tg.initData) {
         fetch('/api/auth', {
           method: 'POST',
@@ -544,6 +566,7 @@ export default function SyndicateApp() {
                 username: data.user.username ? `@${data.user.username}` : '@no_username',
                 initials: initials,
                 avatarColor: defaultAvatarColors[Math.abs(data.user.id) % defaultAvatarColors.length],
+                photoUrl: data.user.photo_url || undefined, // <-- Записываем ссылку на аватарку
                 dollars: 15000,
                 elo: 1200,
                 influence: 450,
