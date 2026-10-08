@@ -18,7 +18,6 @@ export async function POST(request) {
       );
     }
 
-    // Проверка HMAC-подписи Telegram
     const urlParams = new URLSearchParams(initData);
     const hash = urlParams.get('hash');
     urlParams.delete('hash');
@@ -35,13 +34,11 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Invalid auth signature' }, { status: 401 });
     }
 
-    // Извлекаем юзера
     const userStr = urlParams.get('user');
     const user = userStr ? JSON.parse(userStr) : null;
 
     let photoUrl = null;
 
-    // Запрашиваем фото профиля из Telegram Bot API
     if (user && user.id) {
       try {
         const photosRes = await fetch(
@@ -57,7 +54,12 @@ export async function POST(request) {
           const fileData = await fileRes.json();
 
           if (fileData.ok && fileData.result.file_path) {
-            photoUrl = `https://api.telegram.org/file/bot${botToken}/${fileData.result.file_path}`;
+            const imgRes = await fetch(
+              `https://api.telegram.org/file/bot${botToken}/${fileData.result.file_path}`
+            );
+            const arrayBuffer = await imgRes.arrayBuffer();
+            const base64Img = Buffer.from(arrayBuffer).toString('base64');
+            photoUrl = `data:image/jpeg;base64,${base64Img}`;
           }
         }
       } catch (e) {

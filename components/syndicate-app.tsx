@@ -39,7 +39,7 @@ type UserData = {
   username: string
   initials: string
   avatarColor: string
-  photoUrl?: string // <-- ДОБАВИТЬ ЭТУ СТРОКУ
+  photoUrl?: string
   dollars: number
   elo: number
   influence: number
@@ -103,7 +103,7 @@ function Header({ user, onMenu }: { user: UserData; onMenu: () => void }) {
   return (
     <header className="flex items-center justify-between border-b border-white/[0.07] px-4 py-4 sm:px-6">
       <div className="flex items-center gap-3">
-        <DynamicAvatar initials={user.initials} color={user.avatarColor} size="md" />
+        <DynamicAvatar initials={user.initials} color={user.avatarColor} photoUrl={user.photoUrl} size="md" />
         <div>
           <div className="flex items-center gap-2">
             <span className="text-sm font-semibold tracking-tight text-white">{user.name}</span>
@@ -306,7 +306,7 @@ function TableLobby({ user, table, onBack }: { user: UserData; table: (typeof ta
               <span>СИНДИКАТ</span>
             </div>
             <div className="roulette-slot"><DynamicAvatar initials="NO" color="from-fuchsia-300 to-violet-700" size="sm" /><span>Nox</span></div>
-            <div className="roulette-slot"><DynamicAvatar initials={user.initials} color={user.avatarColor} size="sm" /><span>{user.name}</span></div>
+            <div className="roulette-slot"><DynamicAvatar initials={user.initials} color={user.avatarColor} photoUrl={user.photoUrl} size="sm" /><span>{user.name}</span></div>
             <div className="roulette-slot"><DynamicAvatar initials="SA" color="from-emerald-300 to-emerald-700" size="sm" /><span>Sable</span></div>
           </div>
         </div>
@@ -317,7 +317,7 @@ function TableLobby({ user, table, onBack }: { user: UserData; table: (typeof ta
       </div>
       <div className="mt-4 grid grid-cols-2 gap-2.5">
         <div className="player-card">
-          <DynamicAvatar initials={user.initials} color={user.avatarColor} size="sm" />
+          <DynamicAvatar initials={user.initials} color={user.avatarColor} photoUrl={user.photoUrl} size="sm" />
           <div>
             <p className="text-xs font-medium text-white">Вы · {user.name}</p>
             <p className="text-[10px] text-slate-500">Готов к игре</p>
@@ -330,7 +330,7 @@ function TableLobby({ user, table, onBack }: { user: UserData; table: (typeof ta
           { name: 'Nox', initials: 'NO', color: 'from-fuchsia-300 to-violet-700' },
         ].map((p) => (
           <div className="player-card" key={p.name}>
-            <DynamicAvatar initials={user.initials} color={user.avatarColor} photoUrl={user.photoUrl} size="sm" />
+            <DynamicAvatar initials={p.initials} color={p.color} size="sm" />
             <div>
               <p className="text-xs font-medium text-white">{p.name}</p>
               <p className="text-[10px] text-slate-500">Готов к игре</p>
@@ -479,6 +479,7 @@ function TopScreen({ currentUser }: { currentUser: UserData }) {
             <DynamicAvatar
               initials={name === currentUser.name ? currentUser.initials : name.substring(0, 2).toUpperCase()}
               color={name === currentUser.name ? currentUser.avatarColor : defaultAvatarColors[i % defaultAvatarColors.length]}
+              photoUrl={name === currentUser.name ? currentUser.photoUrl : undefined}
               size="sm"
             />
             <span className="flex-1 text-xs font-medium text-white">
@@ -511,7 +512,7 @@ export default function SyndicateApp() {
     influence: 450,
   })
 
-useEffect(() => {
+  useEffect(() => {
     if (typeof window === 'undefined') return
 
     const tg = (window as any).Telegram?.WebApp
@@ -566,7 +567,7 @@ useEffect(() => {
                 username: data.user.username ? `@${data.user.username}` : '@no_username',
                 initials: initials,
                 avatarColor: defaultAvatarColors[Math.abs(data.user.id) % defaultAvatarColors.length],
-                photoUrl: data.user.photo_url || undefined, // <-- Записываем ссылку на аватарку
+                photoUrl: data.user.photo_url || undefined,
                 dollars: 15000,
                 elo: 1200,
                 influence: 450,
