@@ -1,28 +1,47 @@
 <!DOCTYPE html>
-<html>
+<html lang="ru">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Дурак Синдикат</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
-<body>
-  <h1>Hello Mini App</h1>
+<body style="font-family: sans-serif; background: #111; color: #fff; padding: 20px;">
+  <h1>Дурак Синдикат ♠️</h1>
   <div id="user-info">Loading...</div>
-  <script>
-    Telegram.WebApp.ready();
-    Telegram.WebApp.expand();
 
-    // Отправляем initData на бэкенд для проверки
-    fetch('/api/auth', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ initData: Telegram.WebApp.initData })
-    })
-    .then(res => res.json())
-    .then(data => {
-      document.getElementById('user-info').innerText = 
-        data.user ? `Hi, ${data.user.first_name}!` : 'Auth failed';
-    })
-    .catch(err => console.error(err));
+  <script>
+    if (window.Telegram && window.Telegram.WebApp) {
+      Telegram.WebApp.ready();
+      Telegram.WebApp.expand();
+
+      const initData = Telegram.WebApp.initData;
+
+      if (!initData) {
+        document.getElementById('user-info').innerText = 'Открыто вне Telegram';
+      } else {
+        // Меняем /api/auth на /api
+        fetch('/api', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ initData })
+        })
+        .then(res => res.json())
+        .then(data => {
+          if (data.user) {
+            document.getElementById('user-info').innerText = `Привет, ${data.user.first_name}!`;
+          } else {
+            document.getElementById('user-info').innerText = 'Ошибка авторизации: ' + (data.error || 'Auth failed');
+          }
+        })
+        .catch(err => {
+          console.error(err);
+          document.getElementById('user-info').innerText = 'Ошибка сети: ' + err.message;
+        });
+      }
+    } else {
+      document.getElementById('user-info').innerText = 'Telegram WebApp SDK не доступен';
+    }
   </script>
 </body>
 </html>
