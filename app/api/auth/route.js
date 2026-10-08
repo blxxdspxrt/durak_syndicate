@@ -18,6 +18,7 @@ export async function POST(request) {
       );
     }
 
+    // 1. Проверка HMAC
     const urlParams = new URLSearchParams(initData);
     const hash = urlParams.get('hash');
     urlParams.delete('hash');
@@ -38,22 +39,30 @@ export async function POST(request) {
     const user = userStr ? JSON.parse(userStr) : null;
 
     let photoUrl = null;
+    let debugInfo = null;
 
     if (user && user.id) {
       try {
+        // Шаг А: Запрашиваем фото юзера
         const photosRes = await fetch(
           `https://api.telegram.org/bot${botToken}/getUserProfilePhotos?user_id=${user.id}&limit=1`
         );
         const photosData = await photosRes.json();
 
+        debugInfo = { photosData };
+
         if (photosData.ok && photosData.result.total_count > 0) {
           const fileId = photosData.result.photos[0][0].file_id;
+          
+          // Шаг Б: Запрашиваем путь к файлу
           const fileRes = await fetch(
             `https://api.telegram.org/bot${botToken}/getFile?file_id=${fileId}`
           );
           const fileData = await fileRes.json();
+          debugInfo.fileData = fileData;
 
           if (fileData.ok && fileData.result.file_path) {
+            // Шаг В: Скачиваем байты и переводим в Base64
             const imgRes = await fetch(
               `https://api.telegram.org/file/bot${botToken}/${fileData.result.file_path}`
             );
@@ -63,7 +72,7 @@ export async function POST(request) {
           }
         }
       } catch (e) {
-        console.error('Failed to fetch user profile photo:', e);
+        debugInfo = { error: e.message };
       }
     }
 
@@ -72,9 +81,9 @@ export async function POST(request) {
         ...user,
         photo_url: photoUrl,
       },
+      debug: debugInfo
     });
   } catch (err) {
-    console.error('API Error:', err);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
