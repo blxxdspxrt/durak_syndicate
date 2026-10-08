@@ -488,19 +488,44 @@ export default function SyndicateApp() {
   })
 
   useEffect(() => {
-    const tg = typeof window !== 'undefined' ? (window as any).Telegram?.WebApp : null
+    if (typeof window === 'undefined') return
+
+    const tg = (window as any).Telegram?.WebApp
 
     if (tg) {
       tg.ready()
       tg.expand()
 
-      const initData = tg.initData
+      // 1. Быстро достаем юзера прямо из Telegram WebApp SDK (работает мгновенно)
+      const tgUser = tg.initDataUnsafe?.user
 
-      if (initData) {
+      if (tgUser) {
+        const fullName = `${tgUser.first_name || ''} ${tgUser.last_name || ''}`.trim() || tgUser.username || 'Игрок'
+        const initials = fullName
+          .split(' ')
+          .map((n: string) => n[0])
+          .join('')
+          .substring(0, 2)
+          .toUpperCase() || 'PL'
+
+        setUser({
+          id: tgUser.id,
+          name: fullName,
+          username: tgUser.username ? `@${tgUser.username}` : '@no_username',
+          initials: initials,
+          avatarColor: defaultAvatarColors[Math.abs(tgUser.id) % defaultAvatarColors.length],
+          dollars: 15000,
+          elo: 1200,
+          influence: 450,
+        })
+      }
+
+      // 2. Параллельно отправляем initData на бэкенд для серверной проверки HMAC
+      if (tg.initData) {
         fetch('/api/auth', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ initData }),
+          body: JSON.stringify({ initData: tg.initData }),
         })
           .then((res) => res.json())
           .then((data) => {
@@ -508,7 +533,7 @@ export default function SyndicateApp() {
               const fullName = `${data.user.first_name || ''} ${data.user.last_name || ''}`.trim() || data.user.username || 'Игрок'
               const initials = fullName
                 .split(' ')
-                .map((n) => n[0])
+                .map((n: string) => n[0])
                 .join('')
                 .substring(0, 2)
                 .toUpperCase() || 'PL'
@@ -524,30 +549,11 @@ export default function SyndicateApp() {
                 influence: 450,
               })
             }
-            setLoading(false)
           })
-          .catch((err) => {
-            console.error('Auth error:', err)
-            setLoading(false)
-          })
-      } else {
-        // Запасной вариант для обычной веб-вкладки без Telegram
-        const tgUser = tg.initDataUnsafe?.user
-        if (tgUser) {
-          const fullName = `${tgUser.first_name || ''} ${tgUser.last_name || ''}`.trim() || 'Игрок'
-          setUser((prev) => ({
-            ...prev,
-            id: tgUser.id,
-            name: fullName,
-            username: tgUser.username ? `@${tgUser.username}` : '@player',
-            initials: fullName.substring(0, 2).toUpperCase(),
-          }))
-        }
-        setLoading(false)
+          .catch((err) => console.error('Auth API Error:', err))
       }
-    } else {
-      setLoading(false)
     }
+    setLoading(false)
   }, [])
 
   useEffect(() => {
