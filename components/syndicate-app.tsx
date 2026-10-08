@@ -512,7 +512,7 @@ export default function SyndicateApp() {
     influence: 450,
   })
 
-  useEffect(() => {
+ useEffect(() => {
     if (typeof window === 'undefined') return
 
     const tg = (window as any).Telegram?.WebApp
@@ -521,7 +521,6 @@ export default function SyndicateApp() {
       tg.ready()
       tg.expand()
 
-      // 1. Быстро достаем юзера прямо из Telegram WebApp SDK (для мгновенного вывода имени)
       const tgUser = tg.initDataUnsafe?.user
 
       if (tgUser) {
@@ -539,11 +538,12 @@ export default function SyndicateApp() {
           name: fullName,
           username: tgUser.username ? `@${tgUser.username}` : '@no_username',
           initials: initials,
+          // Если Telegram WebApp SDK отдал photo_url на клиенте — используем его сразу
+          photoUrl: tgUser.photo_url || prev.photoUrl,
           avatarColor: defaultAvatarColors[Math.abs(tgUser.id) % defaultAvatarColors.length],
         }))
       }
 
-      // 2. Отправляем initData на бэкенд: валидируем подпись и получаем реальное фото через Bot API
       if (tg.initData) {
         fetch('/api/auth', {
           method: 'POST',
@@ -561,17 +561,19 @@ export default function SyndicateApp() {
                 .substring(0, 2)
                 .toUpperCase() || 'PL'
 
-              setUser({
+              setUser((prev) => ({
+                ...prev,
                 id: data.user.id,
                 name: fullName,
                 username: data.user.username ? `@${data.user.username}` : '@no_username',
                 initials: initials,
                 avatarColor: defaultAvatarColors[Math.abs(data.user.id) % defaultAvatarColors.length],
-                photoUrl: data.user.photo_url || undefined,
+                // Если сервер вытащил Base64 — берем его, иначе оставляем то, что дал SDK
+                photoUrl: data.user.photo_url || prev.photoUrl,
                 dollars: 15000,
                 elo: 1200,
                 influence: 450,
-              })
+              }))
             }
           })
           .catch((err) => console.error('Auth API Error:', err))
