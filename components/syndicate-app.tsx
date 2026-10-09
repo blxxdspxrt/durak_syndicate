@@ -523,6 +523,7 @@ useEffect(() => {
 
     const tgUser = tg.initDataUnsafe?.user
 
+    // 1. Быстро подставляем имя и username из Telegram SDK (чтобы не ждали текста)
     if (tgUser) {
       const fullName = `${tgUser.first_name || ''} ${tgUser.last_name || ''}`.trim() || tgUser.username || 'Игрок'
       const initials = fullName
@@ -543,6 +544,7 @@ useEffect(() => {
       }))
     }
 
+    // 2. Делаем запрос к БД и снимаем Загрузку ТОЛЬКО после получения данных
     if (tg.initData) {
       fetch('/api/auth', {
         method: 'POST',
@@ -567,9 +569,7 @@ useEffect(() => {
               username: data.user.username ? `@${data.user.username}` : '@no_username',
               initials: initials,
               avatarColor: defaultAvatarColors[Math.abs(data.user.id) % defaultAvatarColors.length],
-              // Берём Base64 аватар из БД, если он там есть:
               photoUrl: data.user.photo_url || prev.photoUrl,
-              // Берём актуальный баланс и рейтинг из БД вместо хардкода:
               dollars: data.user.dollars ?? prev.dollars,
               elo: data.user.elo ?? prev.elo,
               influence: data.user.influence ?? prev.influence,
@@ -577,9 +577,15 @@ useEffect(() => {
           }
         })
         .catch((err) => console.error('Auth API Error:', err))
+        .finally(() => {
+          setLoading(false) // <--- Выключаем лоадер только после ответа базы
+        })
+    } else {
+      setLoading(false)
     }
+  } else {
+    setLoading(false)
   }
-  setLoading(false)
 }, [])
 
   useEffect(() => {
