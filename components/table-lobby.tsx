@@ -11,6 +11,8 @@ const placeholderColors = [
   'from-fuchsia-300 to-violet-700',
 ]
 
+const SYNDICATE_NAMES = ['Синдикат Альфа ♠️', 'Синдикат Омега ♦️', 'Синдикат Феникс ♣️']
+
 type LobbyPlayer = {
   id?: string
   user_id?: number | null
@@ -57,7 +59,7 @@ export function TableLobby({
   const totalSlots = table.max_players
   const isSyndicate = table.mode === 'Синдикат'
 
-  // Формируем честную сетку слотов от 1 до max_players
+  // Формируем сетку слотов от 1 до max_players
   const slots = useMemo<Slot[]>(() => {
     const result: Slot[] = []
     const playerBySeat = new Map<number, LobbyPlayer>()
@@ -72,6 +74,14 @@ export function TableLobby({
 
     for (let i = 1; i <= totalSlots; i++) {
       const p = playerBySeat.get(i)
+      let calculatedTeam = 1
+      if (isSyndicate) {
+        if (i <= 2) calculatedTeam = 1
+        else if (i <= 4) calculatedTeam = 2
+        else calculatedTeam = 3
+      } else {
+        calculatedTeam = i
+      }
 
       if (p) {
         const u = p.user
@@ -113,10 +123,9 @@ export function TableLobby({
           isEmpty: false,
           isCreator: thisIsCreator,
           seatNumber: i,
-          team: p.team || (isSyndicate ? (i % 2 === 1 ? 1 : 2) : 1),
+          team: p.team || calculatedTeam,
         })
       } else {
-        // Свободный слот
         result.push({
           name: 'Свободное место',
           initials: '??',
@@ -125,7 +134,7 @@ export function TableLobby({
           isEmpty: true,
           isCreator: false,
           seatNumber: i,
-          team: isSyndicate ? (i % 2 === 1 ? 1 : 2) : 1,
+          team: calculatedTeam,
         })
       }
     }
@@ -137,7 +146,19 @@ export function TableLobby({
   const minPlayers = isSyndicate ? 4 : 2
   const canStart = isCreator && actualFilled >= minPlayers
 
-  const rouletteItems = slots.filter((s) => !s.isEmpty)
+  // Секторы для рулетки
+  const rouletteItems = useMemo(() => {
+    if (!isSyndicate) return slots.filter((s) => !s.isEmpty)
+    
+    // В Синдикате крутим по именам Синдикатов
+    const activeTeams = new Set(slots.filter((s) => !s.isEmpty).map((s) => s.team))
+    return Array.from(activeTeams).map((tNum) => ({
+      name: SYNDICATE_NAMES[tNum - 1] || `Синдикат ${tNum}`,
+      initials: `С${tNum}`,
+      color: placeholderColors[(tNum - 1) % placeholderColors.length],
+      photoUrl: undefined,
+    }))
+  }, [slots, isSyndicate])
 
   const spin = () => {
     if (rouletteItems.length === 0) return
@@ -146,7 +167,7 @@ export function TableLobby({
     window.setTimeout(() => {
       setSpinning(false)
       const w = rouletteItems[Math.floor(Math.random() * rouletteItems.length)]
-      setWinner(w.name.replace(' (Вы)', '').replace(' (Создатель)', ''))
+      setWinner(w.name)
     }, 2200)
   }
 
@@ -157,6 +178,24 @@ export function TableLobby({
 
   const tableId = String(table.id).substring(0, 8).toUpperCase()
   const needMore = Math.max(0, minPlayers - actualFilled)
+
+  // Группировка слотов по Синдикатам для режима Синдикат
+  const syndicateGroups = useMemo(() => {
+    if (!isSyndicate) return []
+    const groups = []
+    const totalTeams = totalSlots / 2
+    for (let t = 1; t <= totalTeams; t++) {
+      const p1 = slots.find((s) => s.seatNumber === t * 2 - 1)
+      const p2 = slots.find((s) => s.seatNumber === t * 2)
+      groups.push({
+        teamNumber: t,
+        name: SYNDICATE_NAMES[t - 1] || `Синдикат ${t}`,
+        p1,
+        p2,
+      })
+    }
+    return groups
+  }, [slots, isSyndicate, totalSlots])
 
   return (
     <div className="page-content">
@@ -177,26 +216,17 @@ export function TableLobby({
         <span className="badge-chip badge-chip-blue">{table.mode}</span>
         <span className="badge-chip">{table.deck}</span>
         <span className="badge-chip badge-chip-blue">{table.turn_time}с / ход</span>
-        {isSyndicate && <span className="badge-chip"><Shield /> Командный 2×2</span>}
+        {isSyndicate && <span className="badge-chip"><Shield /> Командные Синдикаты</span>}
         <span className="table-status ml-auto">{table.status === 'waiting' ? 'НАБОР ИГРОКОВ' : 'СКОРО ИГРА'}</span>
       </div>
-
-      {isSyndicate && (
-        <div className="mb-4 grid grid-cols-2 gap-2.5">
-          <div className="rounded-lg border border-blue-500/20 bg-blue-500/5 p-2.5 text-center">
-            <span className="eyebrow text-blue-400">🔵 КОМАНДА 1</span>
-          </div>
-          <div className="rounded-lg border border-rose-500/20 bg-rose-500/5 p-2.5 text-center">
-            <span className="eyebrow text-rose-400">🔴 КОМАНДА 2</span>
-          </div>
-        </div>
-      )}
 
       {/* Рулетка первенства */}
       <div className="lobby-card">
         <div className="mb-6 text-center">
           <p className="eyebrow text-slate-500">FIRST MOVE ROULETTE</p>
-          <h3 className="mt-2 text-lg font-semibold text-white">Кто ходит первым?</h3>
+          <h3 className="mt-2 text-lg font-semibold text-white">
+            {isSyndicate ? 'Какой Синдикат ходит первым?' : 'Кто ходит первым?'}
+          </h3>
         </div>
         <div className={`roulette ${spinning ? 'spinning' : ''}`}>
           <div className="roulette-ring">
@@ -218,37 +248,65 @@ export function TableLobby({
         </Button>
       </div>
 
-      {/* Карточки мест */}
-      <div className={`mt-4 grid gap-2.5 ${isSyndicate ? 'grid-cols-2' : totalSlots <= 4 ? 'grid-cols-2' : 'grid-cols-3'}`}>
-        {slots.map((p) => (
-          <div
-            key={p.seatNumber}
-            className={`player-card ${p.isEmpty ? 'opacity-40 border-dashed border-slate-700 bg-slate-900/30' : ''} ${
-              isSyndicate && !p.isEmpty
-                ? p.team === 1
-                  ? 'border-blue-500/20 bg-blue-500/[0.02]'
-                  : 'border-rose-500/20 bg-rose-500/[0.02]'
-                : ''
-            }`}
-          >
-            <DynamicAvatar initials={p.initials} color={p.color} photoUrl={p.photoUrl} size="sm" />
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-xs font-medium text-white">
-                {p.isCreator && '👑 '}
-                {p.name}
-              </p>
-              <p className="text-[10px] text-slate-500">
-                {p.isEmpty
-                  ? 'Ожидание игрока'
-                  : isSyndicate
-                  ? `Команда ${p.team} · Место ${p.seatNumber}`
-                  : `Место ${p.seatNumber} · Готов`}
-              </p>
+      {/* Отрисовка слотов */}
+      {isSyndicate ? (
+        /* UI ДЛЯ СИНДИКАТА (Альянсы) */
+        <div className="mt-4 space-y-2.5">
+          {syndicateGroups.map((group) => (
+            <div key={group.teamNumber} className="rounded-xl border border-white/10 bg-slate-900/80 p-3 shadow-md">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-xs font-bold text-blue-400">{group.name}</span>
+                <span className="text-[10px] text-slate-400">
+                  {group.p1 && !group.p1.isEmpty && group.p2 && !group.p2.isEmpty
+                    ? 'Состав готов'
+                    : 'Ожидание напарника'}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {[group.p1, group.p2].map((p, idx) => (
+                  <div
+                    key={idx}
+                    className={`player-card ${p?.isEmpty ? 'opacity-40 border-dashed border-slate-700 bg-slate-900/30' : 'border-blue-500/20 bg-blue-500/[0.02]'}`}
+                  >
+                    <DynamicAvatar initials={p?.initials || '??'} color={p?.color || 'from-slate-700 to-slate-900'} photoUrl={p?.photoUrl} size="sm" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-xs font-medium text-white">
+                        {p?.isCreator && '👑 '}
+                        {p?.name}
+                      </p>
+                      <p className="text-[10px] text-slate-500">
+                        {p?.isEmpty ? 'Свободно' : `Игрок ${idx + 1}`}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
-            <div className={`ml-auto size-1.5 rounded-full ${p.isEmpty ? 'bg-slate-600' : 'bg-emerald-400'}`} />
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      ) : (
+        /* UI ДЛЯ КЛАССИКИ */
+        <div className={`mt-4 grid gap-2.5 ${totalSlots <= 4 ? 'grid-cols-2' : 'grid-cols-3'}`}>
+          {slots.map((p) => (
+            <div
+              key={p.seatNumber}
+              className={`player-card ${p.isEmpty ? 'opacity-40 border-dashed border-slate-700 bg-slate-900/30' : ''}`}
+            >
+              <DynamicAvatar initials={p.initials} color={p.color} photoUrl={p.photoUrl} size="sm" />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-xs font-medium text-white">
+                  {p.isCreator && '👑 '}
+                  {p.name}
+                </p>
+                <p className="text-[10px] text-slate-500">
+                  {p.isEmpty ? 'Ожидание игрока' : `Место ${p.seatNumber} · Готов`}
+                </p>
+              </div>
+              <div className={`ml-auto size-1.5 rounded-full ${p.isEmpty ? 'bg-slate-600' : 'bg-emerald-400'}`} />
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="mt-5 flex flex-col gap-2.5 sm:flex-row">
         <Button variant="outline" onClick={onBack} className="h-11 flex-1 border-white/15 bg-white/[0.04] text-white hover:bg-white/10">

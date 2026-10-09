@@ -1,95 +1,98 @@
+'use client'
+
 import { useState } from 'react'
-import { ArrowRight, X } from 'lucide-react'
+import { Shield, Swords, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
 export function FiltersModal({
   mode,
+  defaultGameMode = 'Синдикат',
   onClose,
   onSubmit,
 }: {
   mode: 'search' | 'create'
+  defaultGameMode?: string
   onClose: () => void
-  onSubmit: (filters: { bet: number; players: number; mode: string; deck: string; turnTime: number }) => void
+  onSubmit: (filters: any) => void
 }) {
+  const isSyndicate = defaultGameMode === 'Синдикат'
+  
   const [bet, setBet] = useState(1000)
-  const [players, setPlayers] = useState(4)
-  const [game, setGame] = useState('Переводной')
+  const [players, setPlayers] = useState(4) // По дефолту 4
   const [deck, setDeck] = useState('36 карт')
   const [turnTime, setTurnTime] = useState(30)
 
-  const handleAction = () => {
-    onSubmit({
-      bet,
-      players,
-      mode: game,
-      deck,
-      turnTime,
-    })
-    onClose()
-  }
+  const allowedPlayerCounts = isSyndicate ? [4, 6] : [2, 3, 4, 6]
 
   return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal-panel" role="dialog" aria-modal="true" aria-labelledby="modal-title">
-        <div className="flex items-start justify-between">
-          <div>
-            <p className="eyebrow text-blue-400">{mode === 'search' ? 'FIND A TABLE' : 'PRIVATE ROOM'}</p>
-            <h2 id="modal-title" className="mt-1 text-xl font-semibold text-white">
-              {mode === 'search' ? 'Настроить поиск' : 'Создать стол'}
-            </h2>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
+      <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-slate-900 p-5 shadow-2xl space-y-4">
+        <div className="flex items-center justify-between border-b border-white/10 pb-3">
+          <div className="flex items-center gap-2">
+            {isSyndicate ? <Shield className="size-4 text-blue-400" /> : <Swords className="size-4 text-amber-400" />}
+            <h3 className="text-sm font-bold text-white">
+              {mode === 'create' ? `Создать стол (${defaultGameMode})` : 'Поиск столов'}
+            </h3>
           </div>
-          <button className="icon-button" onClick={onClose} aria-label="Закрыть"><X className="size-4" /></button>
+          <button onClick={onClose} className="text-slate-400 hover:text-white">
+            <X className="size-5" />
+          </button>
         </div>
-        <div className="mt-6 grid gap-5">
-          <label className="field-label">
-            Размер ставки
-            <div className="mt-2 flex items-center gap-3">
-              <input
-                type="range"
-                min="100"
-                max="100000"
-                step="100"
-                value={bet}
-                onChange={(e) => setBet(Number(e.target.value))}
-              />
-              <span className="value-pill">{bet.toLocaleString()} $</span>
-            </div>
+
+        {/* Команда / Игроки */}
+        <div className="space-y-1.5">
+          <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+            {isSyndicate ? 'Состав (Только парами 2х2 или 3х2)' : 'Количество игроков'}
           </label>
-          <div className="grid grid-cols-2 gap-3">
-            <label className="field-label">
-              Игроков
-              <select value={players} onChange={(e) => setPlayers(Number(e.target.value))} className="field-select">
-                {[2, 4, 6, 8, 10].map((x) => <option key={x} value={x}>{x}</option>)}
-              </select>
-            </label>
-            <label className="field-label">
-              Время хода
-              <select value={turnTime} onChange={(e) => setTurnTime(Number(e.target.value))} className="field-select">
-                <option value={15}>15 секунд</option>
-                <option value={30}>30 секунд</option>
-                <option value={60}>60 секунд</option>
-              </select>
-            </label>
+          <div className="grid grid-cols-2 gap-2">
+            {allowedPlayerCounts.map((count) => (
+              <button
+                key={count}
+                type="button"
+                onClick={() => setPlayers(count)}
+                className={`h-9 rounded-xl border text-xs font-semibold transition-all ${
+                  players === count
+                    ? isSyndicate
+                      ? 'border-blue-500 bg-blue-600/30 text-white shadow-lg shadow-blue-500/20'
+                      : 'border-amber-500 bg-amber-600/30 text-white shadow-lg shadow-amber-500/20'
+                    : 'border-white/10 bg-slate-950/60 text-slate-400 hover:border-white/20'
+                }`}
+              >
+                {isSyndicate ? `${count} Игрока (${count / 2} Синдиката)` : `${count} Игрока`}
+              </button>
+            ))}
           </div>
-          <label className="field-label">
-            Тип игры
-            <div className="segmented mt-2">
-              {['Подкидной', 'Переводной', 'Синдикат'].map((x) => (
-                <button type="button" className={game === x ? 'active' : ''} onClick={() => setGame(x)} key={x}>{x}</button>
-              ))}
-            </div>
-          </label>
-          <label className="field-label">
-            Размер колоды
-            <div className="segmented mt-2">
-              {['24 карты', '36 карт', '52 карты'].map((x) => (
-                <button type="button" className={deck === x ? 'active' : ''} onClick={() => setDeck(x)} key={x}>{x}</button>
-              ))}
-            </div>
-          </label>
         </div>
-        <Button className="mt-7 h-11 w-full bg-blue-500 text-white hover:bg-blue-400" onClick={handleAction}>
-          {mode === 'search' ? 'Найти столы' : 'Создать приватный стол'} <ArrowRight data-icon="inline-end" />
+
+        {/* Ставка */}
+        <div className="space-y-1.5">
+          <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Ставка ($)</label>
+          <div className="grid grid-cols-3 gap-2">
+            {[1000, 5000, 25000].map((b) => (
+              <button
+                key={b}
+                type="button"
+                onClick={() => setBet(b)}
+                className={`h-8 rounded-lg border text-xs font-semibold ${
+                  bet === b ? 'border-emerald-500 bg-emerald-500/20 text-emerald-400' : 'border-white/10 bg-slate-950/60 text-slate-400'
+                }`}
+              >
+                {b.toLocaleString()} $
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <Button
+          onClick={() => {
+            onSubmit({ bet, players, mode: defaultGameMode, deck, turnTime })
+            onClose()
+          }}
+          className={`w-full h-10 font-bold text-white shadow-lg ${
+            isSyndicate ? 'bg-blue-600 hover:bg-blue-500 shadow-blue-600/30' : 'bg-amber-600 hover:bg-amber-500 shadow-amber-600/30'
+          }`}
+        >
+          {mode === 'create' ? 'Создать стол' : 'Найти стол'}
         </Button>
       </div>
     </div>

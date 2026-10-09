@@ -63,12 +63,17 @@ export async function POST(request) {
       seatNumber++
     }
 
+    // 5. РАЗГРАНИЧЕНИЕ ЛОГИКИ КОМАНД СИНДИКАТА (Пары рядом: 1-2 = Команда 1, 3-4 = Команда 2, 5-6 = Команда 3)
     let team = 1
     if (currentTable.mode === 'Синдикат') {
-      team = seatNumber % 2 === 1 ? 1 : 2
+      if (seatNumber <= 2) team = 1
+      else if (seatNumber <= 4) team = 2
+      else team = 3
+    } else {
+      team = seatNumber
     }
 
-    // 5. Вставляем в table_players
+    // 6. Вставляем в table_players
     const { data: insertedPlayer, error: insertError } = await supabase
       .from('table_players')
       .insert({
@@ -87,7 +92,7 @@ export async function POST(request) {
 
     console.log('[JOIN SUCCESS] Player seated:', insertedPlayer)
 
-    // 6. Обновляем счётчик в tables
+    // 7. Обновляем счётчик в tables
     const newCount = takenSeats.length + 1
     const { data: updatedTable } = await supabase
       .from('tables')

@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Check, ShoppingBag, Swords, Trophy, UserRound } from 'lucide-react'
+import { Check, Shield, ShoppingBag, Swords, UserRound } from 'lucide-react'
 import { FiltersModal } from '@/components/filters-modal'
 import { Header } from '@/components/header'
 import { PlayScreen } from '@/components/screens/play-screen'
@@ -19,15 +19,11 @@ const defaultAvatarColors = [
   'from-fuchsia-300 to-violet-700',
 ]
 
-const navItems = [
-  { id: 'play', label: 'Играть', icon: Swords },
-  { id: 'top', label: 'Топ', icon: Trophy },
-  { id: 'shop', label: 'Магазин', icon: ShoppingBag },
-  { id: 'profile', label: 'Профиль', icon: UserRound },
-]
+// Новые режимы навигации
+export type AppTab = 'shop' | 'classic' | 'syndicate' | 'profile' | 'top'
 
 export default function SyndicateApp() {
-  const [tab, setTab] = useState<Tab>('play')
+  const [tab, setTab] = useState<AppTab>('syndicate') // По умолчанию Синдикат
   const [modal, setModal] = useState<'search' | 'create' | null>(null)
   const [lobby, setLobby] = useState<Table | null>(null)
   const [lobbyPlayers, setLobbyPlayers] = useState<any[]>([])
@@ -53,7 +49,6 @@ export default function SyndicateApp() {
     influence: null,
   })
 
-  // Подгрузка списка всех активных столов
   const fetchTables = () => {
     fetch('/api/tables')
       .then((res) => res.json())
@@ -64,24 +59,17 @@ export default function SyndicateApp() {
       .catch((err) => console.error('Fetch Tables Error:', err))
   }
 
-  // Подгрузка всех игроков выбранного стола
   const fetchLobbyPlayers = async (tableId: string) => {
     try {
       const res = await fetch(`/api/tables/${tableId}`)
       const data = await res.json()
-
-      if (data.players && Array.isArray(data.players)) {
-        setLobbyPlayers(data.players)
-      }
-      if (data.table) {
-        setLobby(data.table)
-      }
+      if (data.players && Array.isArray(data.players)) setLobbyPlayers(data.players)
+      if (data.table) setLobby(data.table)
     } catch (err) {
       console.error('Fetch Lobby Players Error:', err)
     }
   }
 
-  // 1. Инициализация пользователя при старте WebApp
   useEffect(() => {
     if (typeof window === 'undefined') return
     const tg = (window as any).Telegram?.WebApp
@@ -149,26 +137,18 @@ export default function SyndicateApp() {
     fetchTables()
   }, [])
 
-  // Автоматическое скрытие уведомления
   useEffect(() => {
     if (!toast) return
     const timer = window.setTimeout(() => setToast(''), 2400)
     return () => window.clearTimeout(timer)
   }, [toast])
 
-  // 2. SUPABASE REALTIME: WebSocket подписка на изменения списка столов
+  // Realtime таблицы
   useEffect(() => {
     fetchTables()
-
     const tablesChannel = supabase
       .channel('realtime_tables')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'tables' },
-        () => {
-          fetchTables()
-        }
-      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tables' }, () => fetchTables())
       .subscribe()
 
     return () => {
@@ -176,26 +156,16 @@ export default function SyndicateApp() {
     }
   }, [])
 
-  // 3. SUPABASE REALTIME: WebSocket подписка на игроков конкретного стола
+  // Realtime лобби
   useEffect(() => {
     if (!lobby?.id) return
-
     fetchLobbyPlayers(lobby.id)
 
     const lobbyChannel = supabase
       .channel(`table_players_${lobby.id}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'table_players',
-          filter: `table_id=eq.${lobby.id}`,
-        },
-        () => {
-          fetchLobbyPlayers(lobby.id)
-        }
-      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'table_players', filter: `table_id=eq.${lobby.id}` }, () => {
+        fetchLobbyPlayers(lobby.id)
+      })
       .subscribe()
 
     return () => {
@@ -203,17 +173,19 @@ export default function SyndicateApp() {
     }
   }, [lobby?.id])
 
-  // Создание стола
   const handleCreateTable = async (filters: { bet: number; players: number; mode: string; deck: string; turnTime: number }) => {
     try {
+      const modeToCreate = tab === 'syndicate' ? 'Синдикат' : filters.mode || 'Переводной'
+      const maxPlayers = tab === 'syndicate' ? 4 : filters.players
+
       const res = await fetch('/api/tables', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           userId: user.id,
           bet: filters.bet,
-          maxPlayers: filters.players,
-          mode: filters.mode,
+          maxPlayers,
+          mode: modeToCreate,
           deck: filters.deck,
           turnTime: filters.turnTime,
         }),
@@ -231,18 +203,13 @@ export default function SyndicateApp() {
     }
   }
 
-  // Выход из стола
   const handleLeaveTable = async () => {
     if (!lobby) return
     try {
       await fetch('/api/tables/leave', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tableId: lobby.id,
-          userId: user.id,
-          isCreator: lobby.creator_id === user.id,
-        }),
+        body: JSON.stringify({ tableId: lobby.id, userId: user.id, isCreator: lobby.creator_id === user.id }),
       })
       setToast('Вы вышли из-за стола')
     } catch (err) {
@@ -253,7 +220,6 @@ export default function SyndicateApp() {
     fetchTables()
   }
 
-  // Подключение к столу
   const handleJoinTable = async (table: Table) => {
     try {
       if (table.creator_id !== user.id && table.current_players < table.max_players) {
@@ -277,32 +243,15 @@ export default function SyndicateApp() {
     }
   }
 
-  // Быстрый поиск
-  const handleQuickSearch = async (filters?: { bet: number; mode: string; deck: string }) => {
-    try {
-      const res = await fetch('/api/tables/quick-search', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(filters || {}),
-      })
-      const data = await res.json()
-
-      if (data.table) {
-        await handleJoinTable(data.table)
-      } else {
-        setToast('Подходящих столов не найдено')
-      }
-    } catch (err) {
-      console.error('Quick Search Error:', err)
-    }
-  }
+  // Фильтруем столы в зависимости от открытой вкладки
+  const filteredTables = tables.filter((t) => {
+    if (tab === 'syndicate') return t.mode === 'Синдикат'
+    if (tab === 'classic') return t.mode !== 'Синдикат'
+    return true
+  })
 
   if (loading || user.dollars === null) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-black font-mono text-sm text-white">
-        Загрузка Синдиката...
-      </div>
-    )
+    return <div className="flex h-screen items-center justify-center bg-black font-mono text-sm text-white">Загрузка Синдиката...</div>
   }
 
   return (
@@ -311,56 +260,105 @@ export default function SyndicateApp() {
         <Header user={user} onMenu={() => setToast('Меню профиля скоро будет доступно')} />
 
         {lobby ? (
-          <TableLobby
-            user={user}
-            table={lobby}
-            players={lobbyPlayers}
-            onBack={handleLeaveTable}
-            isCreator={lobby.creator_id === user.id}
-          />
-        ) : tab === 'play' ? (
+          <TableLobby user={user} table={lobby} players={lobbyPlayers} onBack={handleLeaveTable} isCreator={lobby.creator_id === user.id} />
+        ) : tab === 'classic' || tab === 'syndicate' ? (
           <PlayScreen
             user={user}
-            tables={tables}
+            tables={filteredTables}
             stats={stats}
+            gameMode={tab}
             onSearch={() => setModal('search')}
             onCreate={() => setModal('create')}
             onJoin={handleJoinTable}
           />
         ) : tab === 'profile' ? (
-          <ProfileScreen user={user} />
+          <ProfileScreen user={user} onOpenTop={() => setTab('top')} />
         ) : tab === 'shop' ? (
           <ShopScreen />
         ) : (
           <TopScreen currentUser={user} />
         )}
 
-        <nav className="bottom-nav" aria-label="Основная навигация">
-          {navItems.map(({ id, label, icon: Icon }) => (
+        {/* НОВАЯ ПАНЕЛЬ НАВИГАЦИИ С СДВОЕННЫМ ТУМБЛЕРОМ ПОЦЕНТРУ */}
+        <nav className="bottom-nav flex items-center justify-between px-4 py-2.5 bg-slate-950/95 border-t border-white/10 backdrop-blur-xl">
+          {/* Кнопка Магазин Слева */}
+          <button
+            onClick={() => {
+              setTab('shop')
+              setLobby(null)
+            }}
+            className={`flex flex-col items-center gap-1 transition-all ${
+              tab === 'shop' ? 'text-blue-400 font-semibold scale-105' : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <ShoppingBag className="size-5" />
+            <span className="text-[10px] tracking-wide">Магазин</span>
+          </button>
+
+          {/* Сдвоенный Тумблер Режимов (Классика | Синдикат) Впалый по высоте */}
+          <div className="relative flex items-center rounded-2xl bg-slate-900/90 p-1 border border-white/10 shadow-[inset_0_2px_4px_rgba(0,0,0,0.6)] translate-y-1">
+            {/* Анимированная градиентная подложка */}
+            <div
+              className={`absolute top-1 bottom-1 w-[calc(50%-4px)] rounded-xl bg-gradient-to-r transition-all duration-300 ease-out shadow-lg ${
+                tab === 'classic'
+                  ? 'left-1 from-amber-500 to-orange-600 shadow-amber-500/25'
+                  : tab === 'syndicate'
+                  ? 'left-[calc(50%+2px)] from-blue-600 to-indigo-600 shadow-blue-500/30'
+                  : 'opacity-0 pointer-events-none'
+              }`}
+            />
+
             <button
-              key={id}
               onClick={() => {
-                setTab(id as Tab)
+                setTab('classic')
                 setLobby(null)
               }}
-              className={`nav-item ${tab === id ? 'active' : ''}`}
+              className={`relative z-10 flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl transition-colors ${
+                tab === 'classic' ? 'text-white' : 'text-slate-400 hover:text-slate-200'
+              }`}
             >
-              <Icon />
-              <span>{label}</span>
+              <Swords className="size-3.5" />
+              <span>Классика</span>
             </button>
-          ))}
+
+            <button
+              onClick={() => {
+                setTab('syndicate')
+                setLobby(null)
+              }}
+              className={`relative z-10 flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl transition-colors ${
+                tab === 'syndicate' ? 'text-white' : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Shield className="size-3.5" />
+              <span>Синдикат</span>
+            </button>
+          </div>
+
+          {/* Кнопка Профиль Справа */}
+          <button
+            onClick={() => {
+              setTab('profile')
+              setLobby(null)
+            }}
+            className={`flex flex-col items-center gap-1 transition-all ${
+              tab === 'profile' ? 'text-blue-400 font-semibold scale-105' : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <UserRound className="size-5" />
+            <span className="text-[10px] tracking-wide">Профиль</span>
+          </button>
         </nav>
       </div>
 
       {modal && (
         <FiltersModal
           mode={modal}
+          defaultGameMode={tab === 'syndicate' ? 'Синдикат' : 'Классический'}
           onClose={() => setModal(null)}
           onSubmit={(filters) => {
             if (modal === 'create') {
               handleCreateTable(filters)
-            } else {
-              handleQuickSearch(filters)
             }
           }}
         />
