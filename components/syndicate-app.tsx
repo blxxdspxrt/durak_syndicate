@@ -531,7 +531,7 @@ export default function SyndicateApp() {
     influence: null,
   })
 
- console.log('[RENDER] user state:', JSON.stringify(user))
+ throw new Error('SyndicateApp is rendering from this file')
 
   useEffect(() => {
     if (typeof window === 'undefined') return
