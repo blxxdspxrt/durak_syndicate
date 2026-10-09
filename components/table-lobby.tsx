@@ -149,7 +149,7 @@ export function TableLobby({
   // Секторы для рулетки
   const rouletteItems = useMemo(() => {
     if (!isSyndicate) return slots.filter((s) => !s.isEmpty)
-    
+
     // В Синдикате крутим по именам Синдикатов
     const activeTeams = new Set(slots.filter((s) => !s.isEmpty).map((s) => s.team))
     return Array.from(activeTeams).map((tNum) => ({
@@ -171,9 +171,28 @@ export function TableLobby({
     }, 2200)
   }
 
-  const startGame = () => {
-    setGameStarting(true)
-    setTimeout(() => setGameStarting(false), 1500)
+  // 👇 ЗАМЕНЕНО НА ЗАПРОС К БЭКЕНДУ
+  const startGame = async () => {
+    try {
+      setGameStarting(true)
+      const res = await fetch('/api/games/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tableId: table.id,
+          userId: user.id,
+        }),
+      })
+
+      const data = await res.json()
+      if (!res.ok) {
+        console.error('Start Game Error:', data.error)
+        setGameStarting(false)
+      }
+    } catch (err) {
+      console.error('Start Game Request Error:', err)
+      setGameStarting(false)
+    }
   }
 
   const tableId = String(table.id).substring(0, 8).toUpperCase()

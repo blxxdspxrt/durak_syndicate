@@ -9,6 +9,7 @@ import { ProfileScreen } from '@/components/screens/profile-screen'
 import { ShopScreen } from '@/components/screens/shop-screen'
 import { TopScreen } from '@/components/screens/top-screen'
 import { TableLobby } from '@/components/table-lobby'
+import { GameScreen } from '@/components/screens/game-screen'
 import { Stats, Tab, Table, UserData } from '@/types'
 import { supabase } from '@/lib/supabase'
 
@@ -29,6 +30,9 @@ export default function SyndicateApp() {
   const [lobbyPlayers, setLobbyPlayers] = useState<any[]>([])
   const [toast, setToast] = useState('')
   const [loading, setLoading] = useState(true)
+
+  // 👇 НОВЫЙ СТЕЙТ ДЛЯ СОСТОЯНИЯ ИГРЫ
+  const [gameState, setGameState] = useState<any>(null)
 
   const [tables, setTables] = useState<Table[]>([])
   const [stats, setStats] = useState<Stats>({
@@ -67,6 +71,21 @@ export default function SyndicateApp() {
       if (data.table) setLobby(data.table)
     } catch (err) {
       console.error('Fetch Lobby Players Error:', err)
+    }
+  }
+
+  // 👇 ФУНКЦИЯ ПОДГРУЗКИ СОСТОЯНИЯ ИГРЫ
+  const fetchGameState = async (tableId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('game_states')
+        .select('*')
+        .eq('table_id', tableId)
+        .maybeSingle()
+
+      if (data) setGameState(data)
+    } catch (err) {
+      console.error('Fetch Game State Error:', err)
     }
   }
 
@@ -156,20 +175,43 @@ export default function SyndicateApp() {
     }
   }, [])
 
-  // Realtime лобби
+  // 👇 REALTIME ЛОББИ + ИГРОВОЕ СОСТОЯНИЕ
   useEffect(() => {
-    if (!lobby?.id) return
-    fetchLobbyPlayers(lobby.id)
+    if (!lobby?.id) {
+      setGameState(null)
+      return
+    }
 
+    fetchLobbyPlayers(lobby.id)
+    fetchGameState(lobby.id)
+
+    // Канал игроков
     const lobbyChannel = supabase
       .channel(`table_players_${lobby.id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'table_players', filter: `table_id=eq.${lobby.id}` }, () => {
-        fetchLobbyPlayers(lobby.id)
-      })
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'table_players', filter: `table_id=eq.${lobby.id}` },
+        () => {
+          fetchLobbyPlayers(lobby.id)
+        }
+      )
+      .subscribe()
+
+    // Канал игровых ходов / состояния стола
+    const gameChannel = supabase
+      .channel(`game_state_${lobby.id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'game_states', filter: `table_id=eq.${lobby.id}` },
+        (payload) => {
+          setGameState(payload.new)
+        }
+      )
       .subscribe()
 
     return () => {
       supabase.removeChannel(lobbyChannel)
+      supabase.removeChannel(gameChannel)
     }
   }, [lobby?.id])
 
@@ -217,6 +259,7 @@ export default function SyndicateApp() {
     }
     setLobby(null)
     setLobbyPlayers([])
+    setGameState(null)
     fetchTables()
   }
 
@@ -259,8 +302,24 @@ export default function SyndicateApp() {
       <div className="club-frame">
         <Header user={user} onMenu={() => setToast('Меню профиля скоро будет доступно')} />
 
+        {/* 👇 ИЗМЕНЁННЫЙ БЛОК РЕНДЕРА: LOBBY → GAME_SCREEN → LOBBY */}
         {lobby ? (
-          <TableLobby user={user} table={lobby} players={lobbyPlayers} onBack={handleLeaveTable} isCreator={lobby.creator_id === user.id} />
+          lobby.status === 'in_game' && gameState ? (
+            <GameScreen
+              user={user}
+              gameState={gameState}
+              players={lobbyPlayers}
+              onLeave={handleLeaveTable}
+            />
+          ) : (
+            <TableLobby
+              user={user}
+              table={lobby}
+              players={lobbyPlayers}
+              onBack={handleLeaveTable}
+              isCreator={lobby.creator_id === user.id}
+            />
+          )
         ) : tab === 'classic' || tab === 'syndicate' ? (
           <PlayScreen
             user={user}
