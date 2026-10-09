@@ -4,7 +4,6 @@ import { supabase } from '@/lib/supabase'
 // GET: Получение списка активных столов и агрегированной статистики
 export async function GET() {
   try {
-    // Вытягиваем только столы со статусом waiting или playing
     const { data: tablesList, error } = await supabase
       .from('tables')
       .select('*')
@@ -13,7 +12,6 @@ export async function GET() {
 
     if (error) throw error
 
-    // Динамический расчет статистики онлайн на основе реальных данных из БД
     const activeTablesCount = tablesList ? tablesList.length : 0
     const totalOnlinePlayers = tablesList
       ? tablesList.reduce((acc, t) => acc + (t.current_players || 1), 0)
@@ -22,7 +20,7 @@ export async function GET() {
     return NextResponse.json({
       tables: tablesList || [],
       stats: {
-        onlinePlayers: totalOnlinePlayers || 1, // Чтобы не показывало 0
+        onlinePlayers: totalOnlinePlayers || 1,
         activeTables: activeTablesCount,
         avgTurn: '30с',
         multiplier: 'x2.4',
@@ -43,10 +41,13 @@ export async function POST(request) {
       return NextResponse.json({ error: 'User ID is required' }, { status: 400 })
     }
 
-    const { data: newTable, error } = await supabase
+    const numericUserId = Number(userId)
+
+    // 1. Создаем стол
+    const { data: newTable, error: tableError } = await supabase
       .from('tables')
       .insert({
-        creator_id: userId,
+        creator_id: numericUserId,
         bet: Number(bet) || 1000,
         max_players: Number(maxPlayers) || 4,
         current_players: 1,
@@ -58,24 +59,25 @@ export async function POST(request) {
       .select()
       .single()
 
-    if (error) throw error
+    if (tableError) throw tableError
 
-    try {
-      let team = 1
-      if (newTable.mode === 'Синдикат') {
-        team = 1
-      }
+    // 2. Вставляем создателя в table_players (seat_number: 1)
+    let team = 1
+    if (newTable.mode === 'Синдикат') {
+      team = 1
+    }
 
-      await supabase
-        .from('table_players')
-        .insert({
-          table_id: newTable.id,
-          user_id: userId,
-          seat_number: 1,
-          team,
-        })
-    } catch (tpErr) {
-      console.warn('table_players creator insert skipped:', tpErr.message)
+    const { error: tpError } = await supabase
+      .from('table_players')
+      .upsert({
+        table_id: newTable.id,
+        user_id: numericUserId,
+        seat_number: 1,
+        team,
+      }, { onConflict: 'table_id, seat_number' })
+
+    if (tpError) {
+      console.error('[TABLE_PLAYERS CREATOR INSERT ERROR]:', tpError.message)
     }
 
     return NextResponse.json({ table: newTable })
