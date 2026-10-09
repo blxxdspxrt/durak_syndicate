@@ -598,19 +598,19 @@ console.log('[RENDER] user state:', JSON.stringify(user))
                 .substring(0, 2)
                 .toUpperCase() || 'PL'
 
-            setUser((prev) => ({
-              ...prev,
-              id: data.user.id,
-              name: fullName,
-              username: data.user.username ? `@${data.user.username}` : '@no_username',
-              initials,
-              avatarColor:
-                defaultAvatarColors[Math.abs(data.user.id) % defaultAvatarColors.length],
-              photoUrl: data.user.photo_url || prev.photoUrl,
-              dollars: data.user.dollars ?? null,
-              elo: data.user.elo ?? null,
-              influence: data.user.influence ?? null,
-            }))
+			setUser((prev) => ({
+			  ...prev,
+			  id: data.user.id,
+			  name: fullName,
+			  username: data.user.username ? `@${data.user.username}` : '@no_username',
+			  initials,
+			  avatarColor:
+				defaultAvatarColors[Math.abs(data.user.id) % defaultAvatarColors.length],
+			  photoUrl: data.user.photo_url || prev.photoUrl,
+			  dollars: data.user.dollars === 10000 ? 15000 : (data.user.dollars ?? 15000),
+			  elo: data.user.elo ?? 1200,
+			  influence: data.user.influence ?? 450,
+			}))	
           }
         })
         .catch((err) => console.error('Auth API Error:', err))
