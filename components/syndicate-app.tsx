@@ -513,74 +513,54 @@ export default function SyndicateApp() {
   })
 
  useEffect(() => {
-    if (typeof window === 'undefined') return
+  if (typeof window === 'undefined') return
 
-    const tg = (window as any).Telegram?.WebApp
+  const tg = (window as any).Telegram?.WebApp
 
-    if (tg) {
-      tg.ready()
-      tg.expand()
+  if (tg) {
+    tg.ready()
+    tg.expand()
 
-      const tgUser = tg.initDataUnsafe?.user
+    if (tg.initData) {
+      fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ initData: tg.initData }),
+      })
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.user) {
+            const fullName = `${data.user.first_name || ''} ${data.user.last_name || ''}`.trim() || data.user.username || 'Игрок'
+            const initials = fullName
+              .split(' ')
+              .map((n: string) => n[0])
+              .join('')
+              .substring(0, 2)
+              .toUpperCase() || 'PL'
 
-      if (tgUser) {
-        const fullName = `${tgUser.first_name || ''} ${tgUser.last_name || ''}`.trim() || tgUser.username || 'Игрок'
-        const initials = fullName
-          .split(' ')
-          .map((n: string) => n[0])
-          .join('')
-          .substring(0, 2)
-          .toUpperCase() || 'PL'
-
-        setUser((prev) => ({
-          ...prev,
-          id: tgUser.id,
-          name: fullName,
-          username: tgUser.username ? `@${tgUser.username}` : '@no_username',
-          initials: initials,
-          // Если Telegram WebApp SDK отдал photo_url на клиенте — используем его сразу
-          photoUrl: tgUser.photo_url || prev.photoUrl,
-          avatarColor: defaultAvatarColors[Math.abs(tgUser.id) % defaultAvatarColors.length],
-        }))
-      }
-
-      if (tg.initData) {
-        fetch('/api/auth', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ initData: tg.initData }),
+            setUser({
+              id: data.user.id,
+              name: fullName,
+              username: data.user.username ? `@${data.user.username}` : '@no_username',
+              initials: initials,
+              avatarColor: defaultAvatarColors[Math.abs(data.user.id) % defaultAvatarColors.length],
+              photoUrl: data.user.photo_url || undefined,
+              // Читаем ЧИСТЫЕ данные из Supabase без фоллбеков на хардкод:
+              dollars: data.user.dollars,
+              elo: data.user.elo,
+              influence: data.user.influence,
+            })
+          }
         })
-          .then((res) => res.json())
-          .then((data) => {
-            if (data.user) {
-              const fullName = `${data.user.first_name || ''} ${data.user.last_name || ''}`.trim() || data.user.username || 'Игрок'
-              const initials = fullName
-                .split(' ')
-                .map((n: string) => n[0])
-                .join('')
-                .substring(0, 2)
-                .toUpperCase() || 'PL'
-
-              setUser((prev) => ({
-                ...prev,
-                id: data.user.id,
-                name: fullName,
-                username: data.user.username ? `@${data.user.username}` : '@no_username',
-                initials: initials,
-                avatarColor: defaultAvatarColors[Math.abs(data.user.id) % defaultAvatarColors.length],
-                // Если сервер вытащил Base64 — берем его, иначе оставляем то, что дал SDK
-                photoUrl: data.user.photo_url || prev.photoUrl,
-                dollars: 15000,
-                elo: 1200,
-                influence: 450,
-              }))
-            }
-          })
-          .catch((err) => console.error('Auth API Error:', err))
-      }
+        .catch((err) => console.error('Auth API Error:', err))
+        .finally(() => setLoading(false))
+    } else {
+      setLoading(false)
     }
+  } else {
     setLoading(false)
-  }, [])
+  }
+}, [])
 
   useEffect(() => {
     if (!toast) return

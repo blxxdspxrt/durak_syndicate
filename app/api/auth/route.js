@@ -12,14 +12,7 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Missing initData' }, { status: 400 });
     }
 
-    if (!botToken) {
-      return NextResponse.json(
-        { error: 'TELEGRAM_BOT_TOKEN is not configured on server' },
-        { status: 500 }
-      );
-    }
-
-    // 1. Проверка HMAC валидации
+    // 1. HMAC Валидация
     const urlParams = new URLSearchParams(initData);
     const hash = urlParams.get('hash');
     urlParams.delete('hash');
@@ -40,29 +33,24 @@ export async function POST(request) {
     const user = userStr ? JSON.parse(userStr) : null;
 
     if (!user || !user.id) {
-      return NextResponse.json({ error: 'User data not found in initData' }, { status: 400 });
+      return NextResponse.json({ error: 'User data not found' }, { status: 400 });
     }
 
     let photoUrl = null;
-    let debugInfo = null;
 
-    // 2. Получение фото из Telegram
+    // 2. Получение фото профиля из Telegram
     try {
       const photosRes = await fetch(
         `https://api.telegram.org/bot${botToken}/getUserProfilePhotos?user_id=${user.id}&limit=1`
       );
       const photosData = await photosRes.json();
 
-      debugInfo = { photosData };
-
       if (photosData.ok && photosData.result.total_count > 0) {
         const fileId = photosData.result.photos[0][0].file_id;
-        
         const fileRes = await fetch(
           `https://api.telegram.org/bot${botToken}/getFile?file_id=${fileId}`
         );
         const fileData = await fileRes.json();
-        debugInfo.fileData = fileData;
 
         if (fileData.ok && fileData.result.file_path) {
           const imgRes = await fetch(
@@ -74,33 +62,37 @@ export async function POST(request) {
         }
       }
     } catch (e) {
-      debugInfo = { error: e.message };
+      console.error('Error fetching photo:', e);
     }
 
-    // 3. Сохранение/обновление пользователя в Supabase (upsert)
+    // 3. Формируем объект Тлько с тем, что нужно обновлять
+    const updateData = {
+      id: user.id,
+      username: user.username || '',
+      first_name: user.first_name || '',
+      last_name: user.last_name || '',
+      updated_at: new Date().toISOString(),
+    };
+
+    // Обновляем фото только если удалось скачать новое
+    if (photoUrl) {
+      updateData.photo_url = photoUrl;
+    }
+
+    // Выполняем upsert. Никаких dollars/elo/influence здесь НЕТ!
     const { data: dbUser, error: dbError } = await supabase
       .from('users')
-      .upsert({
-        id: user.id,
-        username: user.username || '',
-        first_name: user.first_name || '',
-        last_name: user.last_name || '',
-        photo_url: photoUrl || '',
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'id' })
+      .upsert(updateData, { onConflict: 'id' })
       .select()
       .single();
 
     if (dbError) {
       console.error('Supabase DB Error:', dbError);
-      return NextResponse.json({ error: 'Database sync failed', details: dbError.message }, { status: 500 });
+      return NextResponse.json({ error: 'Database sync failed' }, { status: 500 });
     }
 
-    // Возвращаем полный объект из базы (с реальными dollars, elo, influence и т.д.)
-    return NextResponse.json({
-      user: dbUser,
-      debug: debugInfo
-    });
+    // Возвращаем ТОЛЬКО то, что реально лежит в базе
+    return NextResponse.json({ user: dbUser });
 
   } catch (err) {
     return NextResponse.json({ error: err.message }, { status: 500 });
