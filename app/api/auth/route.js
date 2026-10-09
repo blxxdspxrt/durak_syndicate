@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import crypto from 'crypto'
 import { supabase } from '@/lib/supabase'
 
-export async function POST(request: Request) {
+export async function POST(request) {
   try {
     const body = await request.json()
     const { initData } = body
@@ -43,8 +43,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'User data not found in initData' }, { status: 400 })
     }
 
-    let photoUrl: string | null = null
-    let debugInfo: any = null
+    let photoUrl = null
+    let debugInfo = null
 
     // 2. Скачивание аватарки в Base64
     try {
@@ -72,13 +72,11 @@ export async function POST(request: Request) {
           photoUrl = `data:image/jpeg;base64,${base64Img}`
         }
       }
-    } catch (e: any) {
+    } catch (e) {
       debugInfo = { error: e.message }
     }
 
-    // 3. РАБОТА С БД СУПАБЕЙЗ (БЕЗ ХАРДКОДА В КОДЕ)
-    
-    // А. Проверяем, есть ли уже юзер в таблице
+    // 3. РАБОТА С БД СУПАБЕЙЗ (СТРОГО ЧЕРЕЗ РЕАЛЬНЫЕ ДАННЫЕ ИЗ БД)
     let { data: dbUser, error: selectError } = await supabase
       .from('users')
       .select('*')
@@ -90,10 +88,8 @@ export async function POST(request: Request) {
     }
 
     if (!dbUser) {
-      // Б. Юзера НЕТ в базе -> Создаём НОВУЮ запись.
-      // Поля dollars, elo, influence НЕ передаём вообще!
-      // PostgreSQL сам подставит их значение по умолчанию (DEFAULT 15000) из схемы таблицы.
-      const insertData: Record<string, any> = {
+      // Юзера нет -> Создаём. Поля dollars/elo/influence подтянет сам PostgreSQL (DEFAULT)
+      const insertData = {
         id: user.id,
         username: user.username || '',
         first_name: user.first_name || '',
@@ -118,9 +114,8 @@ export async function POST(request: Request) {
 
       dbUser = newUser
     } else {
-      // В. Юзер УЖЕ ЕСТЬ -> Обновляем ТОЛЬКО профильные данные (имя, username, аватар).
-      // Баланс (dollars) и игровые метрики ВООБЩЕ НЕ ТРОГАЕМ.
-      const updateData: Record<string, any> = {
+      // Юзер есть -> обновляем профиль
+      const updateData = {
         username: user.username || '',
         first_name: user.first_name || '',
         last_name: user.last_name || '',
@@ -145,13 +140,12 @@ export async function POST(request: Request) {
       }
     }
 
-    // 4. Отдаем ТОЛЬКО чистый объект из PostgreSQL
     return NextResponse.json({
       user: dbUser,
       debug: debugInfo,
     })
 
-  } catch (err: any) {
+  } catch (err) {
     return NextResponse.json({ error: err.message }, { status: 500 })
   }
 }
