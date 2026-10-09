@@ -1,12 +1,15 @@
 import { NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 
-export async function GET(_request, { params }) {
+export async function GET(_request, context) {
+  let rawId = 0
   try {
-    const { id } = params
-    const userId = Number(id)
+    // В Next.js App Router params является Promise
+    const params = await context.params
+    rawId = params?.id
+    const userId = Number(rawId)
 
-    if (!userId) {
+    if (!userId || isNaN(userId)) {
       return NextResponse.json({ error: 'Invalid user id' }, { status: 400 })
     }
 
@@ -34,11 +37,12 @@ export async function GET(_request, { params }) {
 
     return NextResponse.json({ user })
   } catch (err) {
+    const fallbackId = Number(rawId) || 0
     return NextResponse.json(
       {
-        id: Number(params?.id) || 0,
+        id: fallbackId,
         username: '',
-        first_name: `Игрок_${Number(params?.id) || 0}`,
+        first_name: `Игрок_${fallbackId}`,
         last_name: '',
         photo_url: null,
         placeholder: true,

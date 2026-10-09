@@ -1,27 +1,33 @@
 import { NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 
-export async function GET(_request, { params }) {
+export async function GET(_request, context) {
   try {
-    const { id } = params
+    // В Next.js App Router params нужно раскрывать через await
+    const params = await context.params
+    const id = params?.id
 
-    if (!id) {
-      return NextResponse.json({ error: 'Table ID is required' }, { status: 400 })
+    if (!id || typeof id !== 'string') {
+      return NextResponse.json({ error: 'Valid table UUID is required' }, { status: 400 })
     }
 
-    // 1. Запрашиваем информацию о столе
+    // 1. Достаем стол из Supabase
     const { data: table, error: tableError } = await supabase
       .from('tables')
       .select('*')
       .eq('id', id)
       .maybeSingle()
 
-    if (tableError) throw tableError
+    if (tableError) {
+      console.error('[TABLE FETCH ERROR]:', tableError.message)
+      return NextResponse.json({ error: tableError.message }, { status: 500 })
+    }
+
     if (!table) {
       return NextResponse.json({ error: 'Table not found' }, { status: 404 })
     }
 
-    // 2. Достаем реальных игроков из table_players + JOIN с users
+    // 2. Достаем игроков из table_players и делаем JOIN с users
     const { data: tpData, error: tpErr } = await supabase
       .from('table_players')
       .select('*, user:users(id, username, first_name, last_name, photo_url, dollars, elo, influence)')
@@ -32,11 +38,11 @@ export async function GET(_request, { params }) {
       console.error('[TABLE_PLAYERS FETCH ERROR]:', tpErr.message)
     }
 
-    // Честный массив игроков без синтетических заглушек
     const players = tpData || []
 
     return NextResponse.json({ table, players })
   } catch (err) {
+    console.error('[GET TABLE DETAILS CRITICAL ERROR]:', err.message)
     return NextResponse.json({ error: err.message }, { status: 500 })
   }
 }
