@@ -40,9 +40,9 @@ type UserData = {
   initials: string
   avatarColor: string
   photoUrl?: string
-  dollars: number
-  elo: number
-  influence: number
+  dollars: number | null
+  elo: number | null
+  influence: number | null
 }
 
 const defaultAvatarColors = [
@@ -110,15 +110,21 @@ function Header({ user, onMenu }: { user: UserData; onMenu: () => void }) {
             <span className="size-1 rounded-full bg-emerald-400" />
           </div>
           <div className="mt-1 flex gap-1.5">
-            <span className="badge-chip"><Trophy /> ELO {user.elo}</span>
-            <span className="badge-chip badge-chip-blue"><Crown /> {user.influence}</span>
+            <span className="badge-chip">
+              <Trophy /> ELO {user.elo !== null ? user.elo : '...'}
+            </span>
+            <span className="badge-chip badge-chip-blue">
+              <Crown /> {user.influence !== null ? user.influence : '...'}
+            </span>
           </div>
         </div>
       </div>
       <div className="flex items-center gap-2">
         <div className="hidden items-center gap-2 rounded-lg border border-emerald-400/15 bg-emerald-400/[0.06] px-3 py-2 sm:flex">
           <WalletCards className="size-4 text-emerald-400" />
-          <span className="font-mono text-sm font-bold text-emerald-300">{user.dollars.toLocaleString()}</span>
+          <span className="font-mono text-sm font-bold text-emerald-300">
+            {user.dollars !== null ? user.dollars.toLocaleString() : 'Загрузка...'}
+          </span>
           <span className="text-xs text-emerald-400/70">$</span>
         </div>
         <button aria-label="Уведомления" className="icon-button"><Bell className="size-4" /></button>
@@ -191,7 +197,9 @@ function PlayScreen({ user, onSearch, onCreate, onJoin }: { user: UserData; onSe
         </div>
         <div className="flex items-center gap-1.5 rounded-lg border border-emerald-400/15 bg-emerald-400/[0.06] px-2.5 py-2 sm:hidden">
           <WalletCards className="size-3.5 text-emerald-400" />
-          <span className="font-mono text-xs font-bold text-emerald-300">{user.dollars.toLocaleString()} $</span>
+          <span className="font-mono text-xs font-bold text-emerald-300">
+            {user.dollars !== null ? `${user.dollars.toLocaleString()} $` : 'Загрузка...'}
+          </span>
         </div>
       </div>
       <SyndicateBanner onSearch={onSearch} onCreate={onCreate} />
@@ -353,12 +361,21 @@ function ProfileScreen({ user }: { user: UserData }) {
             <p className="eyebrow text-blue-400">PLAYER PROFILE</p>
             <h2 className="mt-1 text-2xl font-semibold text-white">{user.name}</h2>
             <p className="text-xs text-slate-400 mt-0.5">{user.username}</p>
-            <p className="mt-1 font-mono text-sm text-emerald-300">{user.dollars.toLocaleString()} $ <span className="text-slate-500">баланс</span></p>
+            <p className="mt-1 font-mono text-sm text-emerald-300">
+              {user.dollars !== null ? `${user.dollars.toLocaleString()} $` : 'Загрузка...'}{' '}
+              <span className="text-slate-500">баланс</span>
+            </p>
           </div>
         </div>
         <div className="mt-6 grid grid-cols-2 gap-2">
-          <div className="rating-box"><Trophy /><span>ELO<strong>{user.elo}</strong></span></div>
-          <div className="rating-box rating-blue"><Crown /><span>ВЛИЯНИЕ<strong>{user.influence}</strong></span></div>
+          <div className="rating-box">
+            <Trophy />
+            <span>ELO<strong>{user.elo !== null ? user.elo : '...'}</strong></span>
+          </div>
+          <div className="rating-box rating-blue">
+            <Crown />
+            <span>ВЛИЯНИЕ<strong>{user.influence !== null ? user.influence : '...'}</strong></span>
+          </div>
         </div>
       </div>
       <div className="mt-6 grid grid-cols-3 gap-2.5">
@@ -486,7 +503,9 @@ function TopScreen({ currentUser }: { currentUser: UserData }) {
               {name}
               {name === currentUser.name && <span className="ml-2 text-[10px] text-blue-400">ВЫ</span>}
             </span>
-            <span className="font-mono text-xs text-amber-200">{[2140, 1820, 1640, currentUser.elo, 1140][i]}</span>
+            <span className="font-mono text-xs text-amber-200">
+              {[2140, 1820, 1640, currentUser.elo ?? 0, 1140][i]}
+            </span>
           </div>
         ))}
       </div>
@@ -507,44 +526,53 @@ export default function SyndicateApp() {
     username: '@player',
     initials: 'PL',
     avatarColor: defaultAvatarColors[0],
-    dollars: 10000,
-    elo: 1200,
-    influence: 450,
+    dollars: null,
+    elo: null,
+    influence: null,
   })
 
-useEffect(() => {
-  if (typeof window === 'undefined') return
+  useEffect(() => {
+    if (typeof window === 'undefined') return
 
-  const tg = (window as any).Telegram?.WebApp
+    const tg = (window as any).Telegram?.WebApp
 
-  if (tg) {
+    if (!tg) {
+      setLoading(false)
+      return
+    }
+
     tg.ready()
     tg.expand()
 
     const tgUser = tg.initDataUnsafe?.user
 
-    // 1. Быстро подставляем имя и username из Telegram SDK (чтобы не ждали текста)
+    // 1. Быстро подставляем имя/username из Telegram SDK, чтобы аватар и ник были сразу
     if (tgUser) {
-      const fullName = `${tgUser.first_name || ''} ${tgUser.last_name || ''}`.trim() || tgUser.username || 'Игрок'
-      const initials = fullName
-        .split(' ')
-        .map((n: string) => n[0])
-        .join('')
-        .substring(0, 2)
-        .toUpperCase() || 'PL'
+      const fullName =
+        `${tgUser.first_name || ''} ${tgUser.last_name || ''}`.trim() ||
+        tgUser.username ||
+        'Игрок'
+      const initials =
+        fullName
+          .split(' ')
+          .map((n: string) => n[0])
+          .join('')
+          .substring(0, 2)
+          .toUpperCase() || 'PL'
 
       setUser((prev) => ({
         ...prev,
         id: tgUser.id,
         name: fullName,
         username: tgUser.username ? `@${tgUser.username}` : '@no_username',
-        initials: initials,
+        initials,
         photoUrl: tgUser.photo_url || prev.photoUrl,
-        avatarColor: defaultAvatarColors[Math.abs(tgUser.id) % defaultAvatarColors.length],
+        avatarColor:
+          defaultAvatarColors[Math.abs(tgUser.id) % defaultAvatarColors.length],
       }))
     }
 
-    // 2. Делаем запрос к БД и снимаем Загрузку ТОЛЬКО после получения данных
+    // 2. Запрос к БД. Лоадер снимаем ТОЛЬКО в finally — то есть после ответа сервера.
     if (tg.initData) {
       fetch('/api/auth', {
         method: 'POST',
@@ -554,39 +582,43 @@ useEffect(() => {
         .then((res) => res.json())
         .then((data) => {
           if (data.user) {
-            const fullName = `${data.user.first_name || ''} ${data.user.last_name || ''}`.trim() || data.user.username || 'Игрок'
-            const initials = fullName
-              .split(' ')
-              .map((n: string) => n[0])
-              .join('')
-              .substring(0, 2)
-              .toUpperCase() || 'PL'
+            const fullName =
+              `${data.user.first_name || ''} ${data.user.last_name || ''}`.trim() ||
+              data.user.username ||
+              'Игрок'
+            const initials =
+              fullName
+                .split(' ')
+                .map((n: string) => n[0])
+                .join('')
+                .substring(0, 2)
+                .toUpperCase() || 'PL'
 
             setUser((prev) => ({
               ...prev,
               id: data.user.id,
               name: fullName,
               username: data.user.username ? `@${data.user.username}` : '@no_username',
-              initials: initials,
-              avatarColor: defaultAvatarColors[Math.abs(data.user.id) % defaultAvatarColors.length],
+              initials,
+              avatarColor:
+                defaultAvatarColors[Math.abs(data.user.id) % defaultAvatarColors.length],
               photoUrl: data.user.photo_url || prev.photoUrl,
-              dollars: data.user.dollars ?? prev.dollars,
-              elo: data.user.elo ?? prev.elo,
-              influence: data.user.influence ?? prev.influence,
+              dollars: data.user.dollars ?? null,
+              elo: data.user.elo ?? null,
+              influence: data.user.influence ?? null,
             }))
           }
         })
         .catch((err) => console.error('Auth API Error:', err))
         .finally(() => {
-          setLoading(false) // <--- Выключаем лоадер только после ответа базы
+          // Пускаем пользователя в приложение ТОЛЬКО после ответа от БД
+          setLoading(false)
         })
     } else {
+      // Нет initData — не ждём бесконечно, выпускаем на экран
       setLoading(false)
     }
-  } else {
-    setLoading(false)
-  }
-}, [])
+  }, [])
 
   useEffect(() => {
     if (!toast) return
@@ -600,7 +632,11 @@ useEffect(() => {
   }
 
   if (loading) {
-    return <div className="flex h-screen items-center justify-center bg-black text-white font-mono text-sm">Загрузка Синдиката...</div>
+    return (
+      <div className="flex h-screen items-center justify-center bg-black text-white font-mono text-sm">
+        Загрузка Синдиката...
+      </div>
+    )
   }
 
   return (
