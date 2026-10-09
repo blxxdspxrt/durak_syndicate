@@ -635,7 +635,8 @@ console.log('[RENDER] user state:', JSON.stringify(user))
     setToast(`Стол ${table.bet} $ выбран`)
   }
 
-  if (loading) {
+// Блокируем показ приложения, ПОКА идет загрузка ИЛИ пока баланс еще NULL (не ответила БД)
+  if (loading || user.dollars === null) {
     return (
       <div className="flex h-screen items-center justify-center bg-black text-white font-mono text-sm">
         Загрузка Синдиката...
