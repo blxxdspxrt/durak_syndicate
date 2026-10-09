@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Check, Dices, DoorOpen, Play, Spade, Users, Shield } from 'lucide-react'
+import { useState, useMemo } from 'react'
+import { Check, Dices, DoorOpen, Play, Spade, Shield } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Table, UserData } from '@/types'
 import { DynamicAvatar } from './dynamic-avatar'
@@ -13,17 +13,28 @@ const placeholderColors = [
 
 type LobbyPlayer = {
   id?: string
-  user_id?: number
+  user_id?: number | null
   user?: {
     id: number
     username?: string
     first_name?: string
     last_name?: string
     photo_url?: string
-  }
+  } | null
   seat_number: number
   team?: number
-  joined_at?: string
+}
+
+type Slot = {
+  name: string
+  initials: string
+  color: string
+  photoUrl?: string
+  isUser: boolean
+  isEmpty: boolean
+  isCreator: boolean
+  seatNumber: number
+  team: number
 }
 
 export function TableLobby({
@@ -46,86 +57,164 @@ export function TableLobby({
   const totalSlots = table.max_players
   const isSyndicate = table.mode === 'Синдикат'
 
-  const realPlayers: Array<{
-    name: string
-    initials: string
-    color: string
-    photoUrl?: string
-    isUser: boolean
-    isEmpty: boolean
-    isCreator: boolean
-    seatNumber: number
-    team: number
-    userId: number | null
-  }> = []
+  const slots = useMemo<Slot[]>(() => {
+    const result: Slot[] = []
+    const hasRealPlayers = Array.isArray(players) && players.length > 0
+    const expectedFilled = Math.max(table.current_players || 0, isCreator ? 1 : 1)
 
-  const addedUserIds = new Set<number>()
+    if (hasRealPlayers) {
+      const playerBySeat = new Map<number, LobbyPlayer>()
+      for (const p of players) {
+        if (p && typeof p.seat_number === 'number') {
+          playerBySeat.set(p.seat_number, p)
+        }
+      }
 
-  for (let i = 1; i <= totalSlots; i++) {
-    const tp = players.find((p) => p.seat_number === i)
-    if (tp) {
-      const u = tp.user
-      const isCurrentUser = (tp.user_id === user.id) || (u && u.id === user.id)
-      const isThisCreator = isCreator && i === 1
+      let currentUserAdded = false
+      let creatorAdded = false
 
-      let displayName = ''
-      let initials = '??'
-      let photoUrl: string | undefined
-      let color = placeholderColors[(i - 1) % placeholderColors.length]
+      for (let i = 1; i <= totalSlots; i++) {
+        const p = playerBySeat.get(i)
+        if (p) {
+          const u = p.user
+          const userId = p.user_id ?? u?.id ?? null
+          const isCurrentUser = userId === user.id
+          const thisIsCreator = userId === table.creator_id || (isCreator && isCurrentUser && i === 1)
 
-      if (u) {
-        const fullName = [u.first_name, u.last_name].filter(Boolean).join(' ').trim() || u.username || 'Игрок'
-        displayName = fullName
-        initials = fullName.split(' ').map((n) => n[0]).join('').substring(0, 2).toUpperCase() || 'ИГ'
-        photoUrl = u.photo_url || undefined
-        if (tp.user_id) {
-          color = placeholderColors[Math.abs(tp.user_id) % placeholderColors.length]
+          let name = `Игрок ${i}`
+          let initials = `И${i}`
+          let photoUrl: string | undefined
+          let color = placeholderColors[(i - 1) % placeholderColors.length]
+
+          if (u) {
+            const full = [u.first_name, u.last_name].filter(Boolean).join(' ').trim()
+            if (full) name = full
+            else if (u.username) name = u.username
+            initials = name.split(' ').map((x) => x[0]).join('').substring(0, 2).toUpperCase() || `И${i}`
+            photoUrl = u.photo_url || undefined
+            if (userId) color = placeholderColors[Math.abs(Number(userId)) % placeholderColors.length]
+          } else if (userId) {
+            color = placeholderColors[Math.abs(Number(userId)) % placeholderColors.length]
+          }
+
+          if (isCurrentUser) {
+            name = user.name
+            initials = user.initials
+            color = user.avatarColor
+            photoUrl = user.photoUrl
+            currentUserAdded = true
+          }
+
+          if (thisIsCreator) creatorAdded = true
+
+          result.push({
+            name: thisIsCreator ? `${name} (Создатель)` : isCurrentUser ? `${name} (Вы)` : name,
+            initials,
+            color,
+            photoUrl,
+            isUser: isCurrentUser,
+            isEmpty: !userId,
+            isCreator: thisIsCreator,
+            seatNumber: i,
+            team: p.team || (isSyndicate ? (i % 2 === 1 ? 1 : 2) : 1),
+          })
+        } else {
+          result.push({
+            name: 'Свободное место',
+            initials: '??',
+            color: 'from-slate-500 to-slate-700',
+            isUser: false,
+            isEmpty: true,
+            isCreator: false,
+            seatNumber: i,
+            team: isSyndicate ? (i % 2 === 1 ? 1 : 2) : 1,
+          })
+        }
+      }
+
+      if (!currentUserAdded) {
+        for (let i = 0; i < result.length; i++) {
+          if (result[i].isEmpty) {
+            result[i] = {
+              ...result[i],
+              name: `${user.name} (Вы)`,
+              initials: user.initials,
+              color: user.avatarColor,
+              photoUrl: user.photoUrl,
+              isUser: true,
+              isEmpty: false,
+            }
+            break
+          }
+        }
+      }
+
+      if (isCreator && !creatorAdded) {
+        for (let i = 0; i < result.length; i++) {
+          if (result[i].isUser) {
+            result[i] = { ...result[i], isCreator: true, name: result[i].name.replace(' (Вы)', '') + ' (Создатель)' }
+            break
+          }
+        }
+      }
+
+      return result
+    }
+
+    const currentFilled = Math.min(expectedFilled, totalSlots)
+    for (let i = 1; i <= totalSlots; i++) {
+      const isFilled = i <= currentFilled
+      const seatIsCreator = isCreator && i === 1
+      const seatIsCurrentUser = seatIsCreator || (!isCreator && i === 2) || i === 1
+
+      if (isFilled) {
+        if (seatIsCurrentUser) {
+          result.push({
+            name: seatIsCreator ? `${user.name} (Создатель)` : `${user.name} (Вы)`,
+            initials: user.initials,
+            color: user.avatarColor,
+            photoUrl: user.photoUrl,
+            isUser: true,
+            isEmpty: false,
+            isCreator: seatIsCreator,
+            seatNumber: i,
+            team: isSyndicate ? (i % 2 === 1 ? 1 : 2) : 1,
+          })
+        } else {
+          const idx = i - 2
+          const name = placeholderNames[idx % placeholderNames.length]
+          result.push({
+            name,
+            initials: name.substring(0, 2).toUpperCase(),
+            color: placeholderColors[(i) % placeholderColors.length],
+            isUser: false,
+            isEmpty: false,
+            isCreator: false,
+            seatNumber: i,
+            team: isSyndicate ? (i % 2 === 1 ? 1 : 2) : 1,
+          })
         }
       } else {
-        displayName = `Игрок ${i}`
-        initials = `И${i}`
+        result.push({
+          name: 'Свободное место',
+          initials: '??',
+          color: 'from-slate-500 to-slate-700',
+          isUser: false,
+          isEmpty: true,
+          isCreator: false,
+          seatNumber: i,
+          team: isSyndicate ? (i % 2 === 1 ? 1 : 2) : 1,
+        })
       }
-
-      if (isCurrentUser) {
-        color = user.avatarColor
-        initials = user.initials
-        photoUrl = user.photoUrl
-        displayName = user.name
-      }
-
-      if (tp.user_id) addedUserIds.add(tp.user_id)
-
-      realPlayers.push({
-        name: isThisCreator ? displayName + ' (Создатель)' : isCurrentUser ? displayName + ' (Вы)' : displayName,
-        initials,
-        color,
-        photoUrl,
-        isUser: isCurrentUser,
-        isEmpty: false,
-        isCreator: isThisCreator,
-        seatNumber: i,
-        team: tp.team || 1,
-        userId: tp.user_id || null,
-      })
-    } else {
-      realPlayers.push({
-        name: 'Свободное место',
-        initials: '??',
-        color: 'from-slate-500 to-slate-700',
-        isUser: false,
-        isEmpty: true,
-        isCreator: false,
-        seatNumber: i,
-        team: isSyndicate ? (i % 2 === 1 ? 1 : 2) : 1,
-        userId: null,
-      })
     }
-  }
+    return result
+  }, [players, table, user, isCreator, totalSlots, isSyndicate])
 
-  const actualFilled = realPlayers.filter((p) => !p.isEmpty).length
-  const canStart = isCreator && actualFilled >= (isSyndicate ? 4 : 2)
+  const actualFilled = slots.filter((s) => !s.isEmpty).length
+  const minPlayers = isSyndicate ? 4 : 2
+  const canStart = isCreator && actualFilled >= minPlayers
 
-  const rouletteItems = realPlayers.filter((p) => !p.isEmpty).slice(0, 4)
+  const rouletteItems = slots.filter((s) => !s.isEmpty).slice(0, 4)
   while (rouletteItems.length < 4) {
     const idx = rouletteItems.length
     rouletteItems.push({
@@ -137,7 +226,6 @@ export function TableLobby({
       isCreator: false,
       seatNumber: 0,
       team: 1,
-      userId: null,
     })
   }
 
@@ -146,9 +234,9 @@ export function TableLobby({
     setWinner('')
     window.setTimeout(() => {
       setSpinning(false)
-      const active = realPlayers.filter((p) => !p.isEmpty)
-      const randomWinner = active[Math.floor(Math.random() * active.length)]
-      setWinner(randomWinner.name.replace(' (Вы)', '').replace(' (Создатель)', ''))
+      const active = slots.filter((s) => !s.isEmpty)
+      const w = active[Math.floor(Math.random() * active.length)]
+      setWinner(w.name.replace(' (Вы)', '').replace(' (Создатель)', ''))
     }, 2200)
   }
 
@@ -158,7 +246,7 @@ export function TableLobby({
   }
 
   const tableId = String(table.id).substring(0, 8).toUpperCase()
-  const needMore = (isSyndicate ? 4 : 2) - actualFilled
+  const needMore = Math.max(0, minPlayers - actualFilled)
 
   return (
     <div className="page-content">
@@ -215,7 +303,7 @@ export function TableLobby({
       </div>
 
       <div className={`mt-4 grid gap-2.5 ${isSyndicate ? 'grid-cols-2' : totalSlots <= 4 ? 'grid-cols-2' : totalSlots <= 6 ? 'grid-cols-3' : 'grid-cols-2'}`}>
-        {realPlayers.map((p) => (
+        {slots.map((p) => (
           <div
             className={`player-card ${p.isEmpty ? 'opacity-40' : ''} ${
               isSyndicate
@@ -267,3 +355,5 @@ export function TableLobby({
     </div>
   )
 }
+
+const placeholderNames = ['Игрок_Alpha', 'Игрок_Beta', 'Игрок_Gamma', 'Игрок_Delta', 'Игрок_Epsilon', 'Игрок_Zeta']

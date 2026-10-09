@@ -192,10 +192,27 @@ export default function SyndicateApp() {
       })
       const data = await res.json()
       if (data.table) {
+        const isSyndicate = data.table.mode === 'Синдикат'
         setLobby(data.table)
-        setLobbyPlayers([])
+        setLobbyPlayers([
+          {
+            id: 'local-creator',
+            table_id: data.table.id,
+            user_id: user.id,
+            seat_number: 1,
+            team: 1,
+            user: {
+              id: user.id,
+              username: user.username || '',
+              first_name: user.name.split(' ')[0] || user.name,
+              last_name: user.name.split(' ')[1] || '',
+              photo_url: user.photoUrl,
+            },
+          },
+        ])
         setToast(`Стол на ${data.table.bet} $ создан!`)
         fetchTables()
+        setTimeout(() => fetchLobbyPlayers(data.table.id), 400)
       }
     } catch (err) {
       console.error('Create Table Error:', err)
@@ -226,6 +243,7 @@ export default function SyndicateApp() {
 
   // Хэндлер подключения к столу
   const handleJoinTable = async (table: Table) => {
+    let joined = false
     try {
       if (table.creator_id !== user.id && table.current_players < table.max_players) {
         const res = await fetch('/api/tables/join', {
@@ -236,13 +254,54 @@ export default function SyndicateApp() {
         const data = await res.json()
         if (data.table) {
           table = data.table
+          joined = true
         }
       }
+      const isCreatorOfThis = table.creator_id === user.id
+      const isSyndicate = table.mode === 'Синдикат'
+      const localSeat = isCreatorOfThis ? 1 : table.current_players
+
+      const basePlayers = []
+      if (isCreatorOfThis || table.creator_id) {
+        basePlayers.push({
+          id: 'local-creator',
+          table_id: table.id,
+          user_id: table.creator_id,
+          seat_number: 1,
+          team: 1,
+          user: isCreatorOfThis ? {
+            id: user.id,
+            username: user.username || '',
+            first_name: user.name.split(' ')[0] || user.name,
+            last_name: user.name.split(' ')[1] || '',
+            photo_url: user.photoUrl,
+          } : null,
+        })
+      }
+
+      if (!isCreatorOfThis) {
+        let freeSeat = 2
+        basePlayers.push({
+          id: 'local-me',
+          table_id: table.id,
+          user_id: user.id,
+          seat_number: freeSeat,
+          team: isSyndicate ? (freeSeat % 2 === 1 ? 1 : 2) : 1,
+          user: {
+            id: user.id,
+            username: user.username || '',
+            first_name: user.name.split(' ')[0] || user.name,
+            last_name: user.name.split(' ')[1] || '',
+            photo_url: user.photoUrl,
+          },
+        })
+      }
+
       setLobby(table)
-      setLobbyPlayers([])
-      fetchLobbyPlayers(table.id)
+      setLobbyPlayers(basePlayers)
       setToast(`Вошли за стол ${table.bet} $`)
       fetchTables()
+      setTimeout(() => fetchLobbyPlayers(table.id), 400)
     } catch (err) {
       console.error('Join Table Error:', err)
       setLobby(table)
