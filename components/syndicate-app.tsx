@@ -654,4 +654,3 @@ console.log('[RENDER] user state:', JSON.stringify(user))
       )}
     </main>
   )
-}
