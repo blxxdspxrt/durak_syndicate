@@ -531,6 +531,8 @@ export default function SyndicateApp() {
     influence: null,
   })
 
+ console.log('[RENDER] user state:', JSON.stringify(user))
+
   useEffect(() => {
     if (typeof window === 'undefined') return
 
@@ -548,6 +550,7 @@ export default function SyndicateApp() {
 
     // 1. Быстро подставляем имя/username из Telegram SDK, чтобы аватар и ник были сразу
     if (tgUser) {
+	console.log('[TG SDK] tgUser:', JSON.stringify(tgUser))
       const fullName =
         `${tgUser.first_name || ''} ${tgUser.last_name || ''}`.trim() ||
         tgUser.username ||
@@ -581,6 +584,7 @@ export default function SyndicateApp() {
       })
         .then((res) => res.json())
         .then((data) => {
+			console.log('[API RESPONSE] data:', JSON.stringify(data))
           if (data.user) {
             const fullName =
               `${data.user.first_name || ''} ${data.user.last_name || ''}`.trim() ||
