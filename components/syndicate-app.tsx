@@ -548,32 +548,6 @@ console.log('[RENDER] user state:', JSON.stringify(user))
 
     const tgUser = tg.initDataUnsafe?.user
 
-    // 1. Быстро подставляем имя/username из Telegram SDK, чтобы аватар и ник были сразу
-    if (tgUser) {
-	console.log('[TG SDK] tgUser:', JSON.stringify(tgUser))
-      const fullName =
-        `${tgUser.first_name || ''} ${tgUser.last_name || ''}`.trim() ||
-        tgUser.username ||
-        'Игрок'
-      const initials =
-        fullName
-          .split(' ')
-          .map((n: string) => n[0])
-          .join('')
-          .substring(0, 2)
-          .toUpperCase() || 'PL'
-
-      setUser((prev) => ({
-        ...prev,
-        id: tgUser.id,
-        name: fullName,
-        username: tgUser.username ? `@${tgUser.username}` : '@no_username',
-        initials,
-        photoUrl: tgUser.photo_url || prev.photoUrl,
-        avatarColor:
-          defaultAvatarColors[Math.abs(tgUser.id) % defaultAvatarColors.length],
-      }))
-    }
 
     // 2. Запрос к БД. Лоадер снимаем ТОЛЬКО в finally — то есть после ответа сервера.
     if (tg.initData) {
