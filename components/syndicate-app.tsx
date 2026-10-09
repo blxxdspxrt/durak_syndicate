@@ -52,7 +52,7 @@ export default function SyndicateApp() {
     influence: null,
   })
 
-  // Функция подгрузки столов из Supabase
+  // Подгрузка списка всех активных столов
   const fetchTables = () => {
     fetch('/api/tables')
       .then((res) => res.json())
@@ -63,21 +63,29 @@ export default function SyndicateApp() {
       .catch((err) => console.error('Fetch Tables Error:', err))
   }
 
-  // Функция подгрузки игроков за столом
-  const fetchLobbyPlayers = (tableId: string) => {
-    fetch(`/api/tables/${tableId}`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.players) setLobbyPlayers(data.players)
-        if (data.table) setLobby(data.table)
-      })
-      .catch((err) => console.error('Fetch Lobby Players Error:', err))
+  // Подгрузка всех игроков выбранного стола
+  const fetchLobbyPlayers = async (tableId: string) => {
+    try {
+      const res = await fetch(`/api/tables/${tableId}`)
+      const data = await res.json()
+      
+      if (data.players && Array.isArray(data.players)) {
+        setLobbyPlayers(data.players)
+      }
+      if (data.table) {
+        setLobby(data.table)
+      }
+    } catch (err) {
+      console.error('Fetch Lobby Players Error:', err)
+    }
   }
 
+  // Авторизация WebApp и инициализация пользователя
   useEffect(() => {
     if (typeof window === 'undefined') return
     const tg = (window as any).Telegram?.WebApp
-    if (!tg) {
+
+    if (!tg || !tg.initData) {
       setUser((prev) => ({
         ...prev,
         id: 999999,
@@ -97,73 +105,61 @@ export default function SyndicateApp() {
     tg.ready()
     tg.expand()
 
-    if (tg.initData) {
-      fetch('/api/auth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ initData: tg.initData }),
-      })
-        .then((res) => res.json())
-        .then((data) => {
-          if (data.user) {
-            const fullName = `${data.user.first_name || ''} ${data.user.last_name || ''}`.trim() || data.user.username || 'Игрок'
-            const initials = fullName.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase() || 'PL'
+    fetch('/api/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ initData: tg.initData }),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.user) {
+          const fullName = `${data.user.first_name || ''} ${data.user.last_name || ''}`.trim() || data.user.username || 'Игрок'
+          const initials = fullName.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase() || 'PL'
 
-            setUser({
-              id: data.user.id,
-              name: fullName,
-              username: data.user.username ? `@${data.user.username}` : '@no_username',
-              initials,
-              avatarColor: defaultAvatarColors[Math.abs(data.user.id) % defaultAvatarColors.length],
-              photoUrl: data.user.photo_url || undefined,
-              dollars: data.user.dollars ?? 15000,
-              elo: data.user.elo ?? 1200,
-              influence: data.user.influence ?? 450,
-            })
-          }
-        })
-        .catch((err) => {
-          console.error('Auth API Error:', err)
-          setUser((prev) => ({
-            ...prev,
-            id: 999999,
-            name: 'Гость',
-            username: '@guest',
-            initials: 'ГС',
-            avatarColor: defaultAvatarColors[0],
-            dollars: 15000,
-            elo: 1200,
-            influence: 450,
-          }))
-        })
-        .finally(() => setLoading(false))
-    } else {
-      setUser((prev) => ({
-        ...prev,
-        id: 999999,
-        name: 'Гость',
-        username: '@guest',
-        initials: 'ГС',
-        avatarColor: defaultAvatarColors[0],
-        dollars: 15000,
-        elo: 1200,
-        influence: 450,
-      }))
-      setLoading(false)
-    }
+          setUser({
+            id: Number(data.user.id),
+            name: fullName,
+            username: data.user.username ? `@${data.user.username}` : '@no_username',
+            initials,
+            avatarColor: defaultAvatarColors[Math.abs(Number(data.user.id)) % defaultAvatarColors.length],
+            photoUrl: data.user.photo_url || undefined,
+            dollars: data.user.dollars ?? 15000,
+            elo: data.user.elo ?? 1200,
+            influence: data.user.influence ?? 450,
+          })
+        }
+      })
+      .catch((err) => {
+        console.error('Auth API Error:', err)
+        setUser((prev) => ({
+          ...prev,
+          id: 999999,
+          name: 'Гость',
+          username: '@guest',
+          initials: 'ГС',
+          avatarColor: defaultAvatarColors[0],
+          dollars: 15000,
+          elo: 1200,
+          influence: 450,
+        }))
+      })
+      .finally(() => setLoading(false))
 
     fetchTables()
   }, [])
 
+  // Автоматический скрытый тост
   useEffect(() => {
     if (!toast) return
     const timer = window.setTimeout(() => setToast(''), 2400)
     return () => window.clearTimeout(timer)
   }, [toast])
 
+  // Периодический поллинг стола и игроков
   useEffect(() => {
     fetchTables()
     if (lobby) fetchLobbyPlayers(lobby.id)
+
     const interval = window.setInterval(() => {
       if (!lobby) {
         fetchTables()
@@ -171,18 +167,19 @@ export default function SyndicateApp() {
         fetchLobbyPlayers(lobby.id)
         fetchTables()
       }
-    }, 5000)
-    return () => window.clearInterval(interval)
-  }, [lobby])
+    }, 3000)
 
-  // Хэндлер создания нового стола
+    return () => window.clearInterval(interval)
+  }, [lobby?.id])
+
+  // Создание стола
   const handleCreateTable = async (filters: { bet: number; players: number; mode: string; deck: string; turnTime: number }) => {
     try {
       const res = await fetch('/api/tables', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          userId: user.id || 1,
+          userId: user.id,
           bet: filters.bet,
           maxPlayers: filters.players,
           mode: filters.mode,
@@ -191,18 +188,19 @@ export default function SyndicateApp() {
         }),
       })
       const data = await res.json()
+
       if (data.table) {
         setLobby(data.table)
         setToast(`Стол на ${data.table.bet} $ создан!`)
+        await fetchLobbyPlayers(data.table.id)
         fetchTables()
-        setTimeout(() => fetchLobbyPlayers(data.table.id), 400)
       }
     } catch (err) {
       console.error('Create Table Error:', err)
     }
   }
 
-  // Хэндлер выхода из стола
+  // Выход из стола
   const handleLeaveTable = async () => {
     if (!lobby) return
     try {
@@ -224,7 +222,7 @@ export default function SyndicateApp() {
     fetchTables()
   }
 
-  // Хэндлер подключения к столу (чистый, без старых хвостов)
+  // Подключение к столу
   const handleJoinTable = async (table: Table) => {
     try {
       if (table.creator_id !== user.id && table.current_players < table.max_players) {
@@ -239,9 +237,7 @@ export default function SyndicateApp() {
 
       setLobby(table)
       setToast(`Вошли за стол ${table.bet} $`)
-
-      // Выкачиваем реальный состав из Supabase
-      fetchLobbyPlayers(table.id)
+      await fetchLobbyPlayers(table.id)
       fetchTables()
     } catch (err) {
       console.error('Join Table Error:', err)
@@ -250,7 +246,7 @@ export default function SyndicateApp() {
     }
   }
 
-  // Хэндлер быстрого поиска
+  // Быстрый поиск
   const handleQuickSearch = async (filters?: { bet: number; mode: string; deck: string }) => {
     try {
       const res = await fetch('/api/tables/quick-search', {
@@ -272,7 +268,7 @@ export default function SyndicateApp() {
 
   if (loading || user.dollars === null) {
     return (
-      <div className="flex h-screen items-center justify-center bg-black text-white font-mono text-sm">
+      <div className="flex h-screen items-center justify-center bg-black font-mono text-sm text-white">
         Загрузка Синдиката...
       </div>
     )
@@ -282,17 +278,23 @@ export default function SyndicateApp() {
     <main className="club-shell">
       <div className="club-frame">
         <Header user={user} onMenu={() => setToast('Меню профиля скоро будет доступно')} />
-        
+
         {lobby ? (
-          <TableLobby user={user} table={lobby} players={lobbyPlayers} onBack={handleLeaveTable} isCreator={lobby.creator_id === user.id} />
+          <TableLobby
+            user={user}
+            table={lobby}
+            players={lobbyPlayers}
+            onBack={handleLeaveTable}
+            isCreator={lobby.creator_id === user.id}
+          />
         ) : tab === 'play' ? (
-          <PlayScreen 
-            user={user} 
-            tables={tables} 
+          <PlayScreen
+            user={user}
+            tables={tables}
             stats={stats}
-            onSearch={() => setModal('search')} 
-            onCreate={() => setModal('create')} 
-            onJoin={handleJoinTable} 
+            onSearch={() => setModal('search')}
+            onCreate={() => setModal('create')}
+            onJoin={handleJoinTable}
           />
         ) : tab === 'profile' ? (
           <ProfileScreen user={user} />
