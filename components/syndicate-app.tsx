@@ -241,9 +241,8 @@ export default function SyndicateApp() {
     fetchTables()
   }
 
-  // Хэндлер подключения к столу
+// Хэндлер подключения к столу
   const handleJoinTable = async (table: Table) => {
-    let joined = false
     try {
       if (table.creator_id !== user.id && table.current_players < table.max_players) {
         const res = await fetch('/api/tables/join', {
@@ -252,14 +251,43 @@ export default function SyndicateApp() {
           body: JSON.stringify({ tableId: table.id, userId: user.id }),
         })
         const data = await res.json()
-        if (data.table) {
-          table = data.table
-          joined = true
-        }
+        if (data.table) table = data.table
       }
+
+      setLobby(table)
+      setToast(`Вошли за стол ${table.bet} $`)
+
+      // Сразу выкачиваем настоящий состав игроков из БД
+      fetchLobbyPlayers(table.id)
+      fetchTables()
+    } catch (err) {
+      console.error('Join Table Error:', err)
+      setLobby(table)
+      fetchLobbyPlayers(table.id)
+    }
+  }
       const isCreatorOfThis = table.creator_id === user.id
       const isSyndicate = table.mode === 'Синдикат'
       const localSeat = isCreatorOfThis ? 1 : table.current_players
+
+      let creatorUserObj: any = null
+      if (!isCreatorOfThis && table.creator_id) {
+        try {
+          const creatorRes = await fetch(`/api/users/${table.creator_id}`)
+          const creatorData = await creatorRes.json()
+          if (creatorData && creatorData.user) {
+            creatorUserObj = {
+              id: creatorData.user.id,
+              username: creatorData.user.username || '',
+              first_name: creatorData.user.first_name || `Игрок_${creatorData.user.id}`,
+              last_name: creatorData.user.last_name || '',
+              photo_url: creatorData.user.photo_url || undefined,
+            }
+          }
+        } catch (creatorErr) {
+          console.warn('Не удалось получить инфо о создателе:', (creatorErr as Error).message)
+        }
+      }
 
       const basePlayers = []
       if (isCreatorOfThis || table.creator_id) {
@@ -269,13 +297,21 @@ export default function SyndicateApp() {
           user_id: table.creator_id,
           seat_number: 1,
           team: 1,
-          user: isCreatorOfThis ? {
-            id: user.id,
-            username: user.username || '',
-            first_name: user.name.split(' ')[0] || user.name,
-            last_name: user.name.split(' ')[1] || '',
-            photo_url: user.photoUrl,
-          } : null,
+          user: isCreatorOfThis
+            ? {
+                id: user.id,
+                username: user.username || '',
+                first_name: user.name.split(' ')[0] || user.name,
+                last_name: user.name.split(' ')[1] || '',
+                photo_url: user.photoUrl,
+              }
+            : creatorUserObj || {
+                id: table.creator_id,
+                username: '',
+                first_name: `Игрок_${table.creator_id}`,
+                last_name: '',
+                photo_url: undefined,
+              },
         })
       }
 
