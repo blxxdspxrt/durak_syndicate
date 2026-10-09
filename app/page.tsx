@@ -2,12 +2,12 @@
 
 import dynamic from 'next/dynamic'
 
-// Отключаем SSR полностью: Next.js больше НЕ БУДЕТ рендерить статику на сервере
+// РћС‚РєР»СЋС‡Р°РµРј SSR РїРѕР»РЅРѕСЃС‚СЊСЋ: Next.js Р±РѕР»СЊС€Рµ РќР• Р‘РЈР”Р•Рў СЂРµРЅРґРµСЂРёС‚СЊ СЃС‚Р°С‚РёРєСѓ РЅР° СЃРµСЂРІРµСЂРµ
 const SyndicateApp = dynamic(() => import('@/components/syndicate-app'), {
   ssr: false,
   loading: () => (
     <div className="flex h-screen items-center justify-center bg-black text-white font-mono text-sm">
-      Загрузка Синдиката...
+      Р—Р°РіСЂСѓР·РєР° РЎРёРЅРґРёРєР°С‚Р°...
     </div>
   ),
 })
