@@ -1,16 +1,18 @@
 import { ArrowRight, CirclePlus, Clock3, LayoutGrid, Search, Spade, Users, WalletCards, Zap } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Table, UserData } from '@/types'
+import { Stats, Table, UserData } from '@/types'
 
 export function PlayScreen({
   user,
   tables,
+  stats,
   onSearch,
   onCreate,
   onJoin,
 }: {
   user: UserData
   tables: Table[]
+  stats: Stats
   onSearch: () => void
   onCreate: () => void
   onJoin: (table: Table) => void
@@ -49,41 +51,49 @@ export function PlayScreen({
         <div className="hero-mark"><Spade /></div>
       </section>
 
-      {/* Active Tables */}
+      {/* Active Tables из БД */}
       <section className="mt-7">
         <div className="mb-3 flex items-end justify-between">
           <div>
             <p className="eyebrow text-slate-500">LIVE NOW</p>
             <h2 className="section-title">Активные столы</h2>
           </div>
-          <button className="text-xs font-medium text-blue-400 hover:text-blue-300">Все столы <ArrowRight className="ml-1 inline size-3" /></button>
+          <button className="text-xs font-medium text-blue-400 hover:text-blue-300">Все столы ({tables.length}) <ArrowRight className="ml-1 inline size-3" /></button>
         </div>
         <div className="flex flex-col gap-2.5">
-          {tables.map((table) => (
-            <div className="table-row" key={table.bet}>
-              <div className={`table-icon tone-${table.tone}`}><Spade /></div>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="font-mono text-sm font-semibold text-white">{table.bet} $</span>
-                  <span className="table-status">ОТКРЫТ</span>
-                </div>
-                <div className="mt-1 flex flex-wrap gap-x-2 text-xs text-slate-500">
-                  <span>{table.players} игроков</span><span>•</span><span>{table.mode}</span><span>•</span><span>{table.deck}</span><span>•</span><span>{table.time}</span>
-                </div>
-              </div>
-              <Button onClick={() => onJoin(table)} size="sm" variant="outline" className="border-white/10 bg-white/[0.03] text-xs text-slate-200 hover:border-blue-400/40 hover:bg-blue-400/10">Войти</Button>
+          {tables.length === 0 ? (
+            <div className="p-4 text-center text-xs text-slate-500 border border-white/10 rounded-xl bg-white/[0.02]">
+              Нет активных столов. Создай первый!
             </div>
-          ))}
+          ) : (
+            tables.map((table) => (
+              <div className="table-row" key={table.id}>
+                <div className={`table-icon tone-${table.bet >= 5000 ? 'gold' : table.bet >= 1000 ? 'blue' : 'green'}`}><Spade /></div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-sm font-semibold text-white">{table.bet.toLocaleString()} $</span>
+                    <span className="table-status">{table.status === 'waiting' ? 'ОТКРЫТ' : 'В ИГРЕ'}</span>
+                  </div>
+                  <div className="mt-1 flex flex-wrap gap-x-2 text-xs text-slate-500">
+                    <span>{table.current_players}/{table.max_players} игроков</span><span>•</span><span>{table.mode}</span><span>•</span><span>{table.deck}</span><span>•</span><span>{table.turn_time}с</span>
+                  </div>
+                </div>
+                <Button onClick={() => onJoin(table)} size="sm" variant="outline" className="border-white/10 bg-white/[0.03] text-xs text-slate-200 hover:border-blue-400/40 hover:bg-blue-400/10">
+                  Войти
+                </Button>
+              </div>
+            ))
+          )}
         </div>
       </section>
 
-      {/* Stats */}
+      {/* Динамическая статистика из БД */}
       <section className="mt-7 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
         {[
-          ['12', 'игр онлайн', Users],
-          ['24', 'карты в колоде', LayoutGrid],
-          ['30с', 'средний ход', Clock3],
-          ['x2.4', 'множитель банка', Zap],
+          [`${stats.onlinePlayers}`, 'игроков онлайн', Users],
+          [`${stats.activeTables}`, 'активных столов', LayoutGrid],
+          [stats.avgTurn, 'средний ход', Clock3],
+          [stats.multiplier, 'множитель банка', Zap],
         ].map(([value, label, Icon]) => (
           <div className="stat-tile" key={String(label)}>
             <Icon className="size-4 text-slate-600" />

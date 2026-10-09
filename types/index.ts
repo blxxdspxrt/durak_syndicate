@@ -13,12 +13,22 @@ export type UserData = {
 }
 
 export type Table = {
-  bet: string
-  players: string
+  id: string
+  creator_id: number
+  bet: number
+  max_players: number
+  current_players: number
   mode: string
   deck: string
-  time: string
-  tone: string
+  turn_time: number
+  status: 'waiting' | 'playing' | 'finished'
+}
+
+export type Stats = {
+  onlinePlayers: number
+  activeTables: number
+  avgTurn: string
+  multiplier: string
 }
 
 export type Tab = 'play' | 'top' | 'shop' | 'profile'

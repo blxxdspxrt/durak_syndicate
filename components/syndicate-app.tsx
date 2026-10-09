@@ -9,19 +9,13 @@ import { ProfileScreen } from '@/components/screens/profile-screen'
 import { ShopScreen } from '@/components/screens/shop-screen'
 import { TopScreen } from '@/components/screens/top-screen'
 import { TableLobby } from '@/components/table-lobby'
-import { Tab, Table, UserData } from '@/types'
+import { Stats, Tab, Table, UserData } from '@/types'
 
 const defaultAvatarColors = [
   'from-sky-400 to-blue-700',
   'from-amber-300 to-orange-700',
   'from-emerald-300 to-emerald-700',
   'from-fuchsia-300 to-violet-700',
-]
-
-const tables: Table[] = [
-  { bet: '1,000', players: '3/6', mode: 'Переводной', deck: '36 карт', time: '30с', tone: 'blue' },
-  { bet: '5,000', players: '4/4', mode: 'Подкидной', deck: '52 карты', time: '60с', tone: 'gold' },
-  { bet: '250', players: '2/6', mode: 'Переводной', deck: '24 карты', time: '15с', tone: 'green' },
 ]
 
 const navItems = [
@@ -38,6 +32,14 @@ export default function SyndicateApp() {
   const [toast, setToast] = useState('')
   const [loading, setLoading] = useState(true)
 
+  const [tables, setTables] = useState<Table[]>([])
+  const [stats, setStats] = useState<Stats>({
+    onlinePlayers: 1,
+    activeTables: 0,
+    avgTurn: '30с',
+    multiplier: 'x2.4',
+  })
+
   const [user, setUser] = useState<UserData>({
     id: 0,
     name: 'Игрок',
@@ -49,11 +51,23 @@ export default function SyndicateApp() {
     influence: null,
   })
 
+  // Функция подгрузки столов из Supabase
+  const fetchTables = () => {
+    fetch('/api/tables')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.tables) setTables(data.tables)
+        if (data.stats) setStats(data.stats)
+      })
+      .catch((err) => console.error('Fetch Tables Error:', err))
+  }
+
   useEffect(() => {
     if (typeof window === 'undefined') return
     const tg = (window as any).Telegram?.WebApp
     if (!tg) {
       setLoading(false)
+      fetchTables()
       return
     }
 
@@ -90,6 +104,8 @@ export default function SyndicateApp() {
     } else {
       setLoading(false)
     }
+
+    fetchTables()
   }, [])
 
   useEffect(() => {
@@ -97,6 +113,53 @@ export default function SyndicateApp() {
     const timer = window.setTimeout(() => setToast(''), 2400)
     return () => window.clearTimeout(timer)
   }, [toast])
+
+  // Хэндлер создания нового стола
+  const handleCreateTable = async (filters: { bet: number; players: number; mode: string; deck: string; turnTime: number }) => {
+    try {
+      const res = await fetch('/api/tables', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user.id || 1,
+          bet: filters.bet,
+          maxPlayers: filters.players,
+          mode: filters.mode,
+          deck: filters.deck,
+          turnTime: filters.turnTime,
+        }),
+      })
+      const data = await res.json()
+      if (data.table) {
+        setLobby(data.table)
+        setToast(`Стол на ${data.table.bet} $ создан!`)
+        fetchTables()
+      }
+    } catch (err) {
+      console.error('Create Table Error:', err)
+    }
+  }
+
+  // Хэндлер быстрого поиска
+  const handleQuickSearch = async (filters?: { bet: number; mode: string; deck: string }) => {
+    try {
+      const res = await fetch('/api/tables/quick-search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(filters || {}),
+      })
+      const data = await res.json()
+
+      if (data.table) {
+        setLobby(data.table)
+        setToast(`Стол на ${data.table.bet} $ найден!`)
+      } else {
+        setToast('Подходящих столов не найдено')
+      }
+    } catch (err) {
+      console.error('Quick Search Error:', err)
+    }
+  }
 
   if (loading || user.dollars === null) {
     return (
@@ -112,16 +175,17 @@ export default function SyndicateApp() {
         <Header user={user} onMenu={() => setToast('Меню профиля скоро будет доступно')} />
         
         {lobby ? (
-          <TableLobby user={user} table={lobby} onBack={() => setLobby(null)} />
+          <TableLobby user={user} table={lobby} onBack={() => { setLobby(null); fetchTables() }} />
         ) : tab === 'play' ? (
           <PlayScreen 
             user={user} 
             tables={tables} 
+            stats={stats}
             onSearch={() => setModal('search')} 
             onCreate={() => setModal('create')} 
             onJoin={(table) => {
               setLobby(table)
-              setToast(`Стол ${table.bet} $ выбран`)
+              setToast(`Вошли за стол ${table.bet} $`)
             }} 
           />
         ) : tab === 'profile' ? (
@@ -148,7 +212,21 @@ export default function SyndicateApp() {
           ))}
         </nav>
       </div>
-      {modal && <FiltersModal mode={modal} onClose={() => setModal(null)} />}
+
+      {modal && (
+        <FiltersModal
+          mode={modal}
+          onClose={() => setModal(null)}
+          onSubmit={(filters) => {
+            if (modal === 'create') {
+              handleCreateTable(filters)
+            } else {
+              handleQuickSearch(filters)
+            }
+          }}
+        />
+      )}
+
       {toast && (
         <div className="toast">
           <Check className="size-4 text-emerald-400" /> {toast}
