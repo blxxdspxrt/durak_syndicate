@@ -526,12 +526,10 @@ export default function SyndicateApp() {
     username: '@player',
     initials: 'PL',
     avatarColor: defaultAvatarColors[0],
-    dollars: 99999,
+    dollars: null,
     elo: null,
     influence: null,
   })
-
-console.log('[RENDER] user state:', JSON.stringify(user))
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -546,10 +544,6 @@ console.log('[RENDER] user state:', JSON.stringify(user))
     tg.ready()
     tg.expand()
 
-    const tgUser = tg.initDataUnsafe?.user
-
-
-    // 2. Запрос к БД. Лоадер снимаем ТОЛЬКО в finally — то есть после ответа сервера.
     if (tg.initData) {
       fetch('/api/auth', {
         method: 'POST',
@@ -558,7 +552,6 @@ console.log('[RENDER] user state:', JSON.stringify(user))
       })
         .then((res) => res.json())
         .then((data) => {
-			console.log('[API RESPONSE] data:', JSON.stringify(data))
           if (data.user) {
             const fullName =
               `${data.user.first_name || ''} ${data.user.last_name || ''}`.trim() ||
@@ -572,25 +565,24 @@ console.log('[RENDER] user state:', JSON.stringify(user))
                 .substring(0, 2)
                 .toUpperCase() || 'PL'
 
-			setUser({
-			  id: data.user.id,
-			  name: fullName,
-			  username: data.user.username ? `@${data.user.username}` : '@no_username',
-			  initials,
-			  avatarColor:
-				defaultAvatarColors[Math.abs(data.user.id) % defaultAvatarColors.length],
-			  photoUrl: data.user.photo_url || undefined,
-			  dollars: data.user.dollars,
-			  elo: data.user.elo,
-			  influence: data.user.influence,
-			})
+            setUser({
+              id: data.user.id,
+              name: fullName,
+              username: data.user.username ? `@${data.user.username}` : '@no_username',
+              initials,
+              avatarColor: defaultAvatarColors[Math.abs(data.user.id) % defaultAvatarColors.length],
+              photoUrl: data.user.photo_url || undefined,
+              dollars: data.user.dollars,
+              elo: data.user.elo,
+              influence: data.user.influence,
+            })
+          }
+        })
         .catch((err) => console.error('Auth API Error:', err))
         .finally(() => {
-          // Пускаем пользователя в приложение ТОЛЬКО после ответа от БД
           setLoading(false)
         })
     } else {
-      // Нет initData — не ждём бесконечно, выпускаем на экран
       setLoading(false)
     }
   }, [])
@@ -606,7 +598,6 @@ console.log('[RENDER] user state:', JSON.stringify(user))
     setToast(`Стол ${table.bet} $ выбран`)
   }
 
-// Блокируем показ приложения, ПОКА идет загрузка ИЛИ пока баланс еще NULL (не ответила БД)
   if (loading || user.dollars === null) {
     return (
       <div className="flex h-screen items-center justify-center bg-black text-white font-mono text-sm">
@@ -654,3 +645,4 @@ console.log('[RENDER] user state:', JSON.stringify(user))
       )}
     </main>
   )
+}
