@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Shield, Spade, Heart, Diamonds, Clubs, ArrowLeft } from 'lucide-react'
+import { Shield, Spade, Heart, Diamond, Club, ArrowLeft } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { UserData } from '@/types'
 import { DynamicAvatar } from '../dynamic-avatar'
@@ -9,8 +9,8 @@ import { DynamicAvatar } from '../dynamic-avatar'
 const SUIT_ICONS: Record<string, any> = {
   s: <Spade className="size-4 text-slate-200" />,
   h: <Heart className="size-4 text-rose-500 fill-rose-500" />,
-  d: <Diamonds className="size-4 text-rose-500 fill-rose-500" />,
-  c: <Clubs className="size-4 text-slate-200 fill-slate-200" />,
+  d: <Diamond className="size-4 text-rose-500 fill-rose-500" />,
+  c: <Club className="size-4 text-slate-200 fill-slate-200" />,
 }
 
 export function GameScreen({
@@ -56,7 +56,7 @@ export function GameScreen({
             .filter((p) => p.user_id !== user.id)
             .map((p) => (
               <div key={p.seat_number} className="flex flex-col items-center gap-1">
-                <DynamicAvatar initials={p.user?.first_name?.[0] || '?' } photoUrl={p.user?.photo_url} size="sm" />
+                <DynamicAvatar initials={p.user?.first_name?.[0] || '?'} photoUrl={p.user?.photo_url} size="sm" />
                 <span className="text-[10px] font-semibold text-emerald-200 max-w-[70px] truncate">
                   {p.user?.first_name || 'Соперник'}
                 </span>
