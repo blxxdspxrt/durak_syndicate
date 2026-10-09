@@ -140,9 +140,30 @@ export async function POST(request) {
       }
     }
 
-    // Защитная страховка от старых записей с 10000 в БД
-    if (dbUser && (dbUser.dollars === 10000 || dbUser.dollars === null || dbUser.dollars === undefined)) {
-      dbUser.dollars = 15000
+    // Защитная страховка: обновляем баланс до 15000 в БД, если нужно
+    const needsBalanceFix = dbUser && (dbUser.dollars === 10000 || dbUser.dollars === null || dbUser.dollars === undefined || dbUser.elo === null || dbUser.elo === undefined || dbUser.influence === null || dbUser.influence === undefined)
+
+    if (needsBalanceFix) {
+      const fixData = {
+        dollars: dbUser.dollars === 10000 || dbUser.dollars === null || dbUser.dollars === undefined ? 15000 : dbUser.dollars,
+        elo: dbUser.elo === null || dbUser.elo === undefined ? 1200 : dbUser.elo,
+        influence: dbUser.influence === null || dbUser.influence === undefined ? 450 : dbUser.influence,
+      }
+
+      const { data: fixedUser, error: fixError } = await supabase
+        .from('users')
+        .update(fixData)
+        .eq('id', user.id)
+        .select()
+        .single()
+
+      if (!fixError && fixedUser) {
+        dbUser = fixedUser
+      } else {
+        dbUser.dollars = fixData.dollars
+        dbUser.elo = fixData.elo
+        dbUser.influence = fixData.influence
+      }
     }
 
     console.log('[AUTH ROUTE SUCCESS] User returned:', dbUser)

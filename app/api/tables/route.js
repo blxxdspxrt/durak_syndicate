@@ -60,6 +60,24 @@ export async function POST(request) {
 
     if (error) throw error
 
+    try {
+      let team = 1
+      if (newTable.mode === 'Синдикат') {
+        team = 1
+      }
+
+      await supabase
+        .from('table_players')
+        .insert({
+          table_id: newTable.id,
+          user_id: userId,
+          seat_number: 1,
+          team,
+        })
+    } catch (tpErr) {
+      console.warn('table_players creator insert skipped:', tpErr.message)
+    }
+
     return NextResponse.json({ table: newTable })
   } catch (err) {
     return NextResponse.json({ error: err.message }, { status: 500 })

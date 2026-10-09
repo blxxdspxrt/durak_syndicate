@@ -29,6 +29,7 @@ export default function SyndicateApp() {
   const [tab, setTab] = useState<Tab>('play')
   const [modal, setModal] = useState<'search' | 'create' | null>(null)
   const [lobby, setLobby] = useState<Table | null>(null)
+  const [lobbyPlayers, setLobbyPlayers] = useState<any[]>([])
   const [toast, setToast] = useState('')
   const [loading, setLoading] = useState(true)
 
@@ -62,10 +63,32 @@ export default function SyndicateApp() {
       .catch((err) => console.error('Fetch Tables Error:', err))
   }
 
+  // Функция подгрузки игроков за столом
+  const fetchLobbyPlayers = (tableId: string) => {
+    fetch(`/api/tables/${tableId}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.players) setLobbyPlayers(data.players)
+        if (data.table) setLobby(data.table)
+      })
+      .catch((err) => console.error('Fetch Lobby Players Error:', err))
+  }
+
   useEffect(() => {
     if (typeof window === 'undefined') return
     const tg = (window as any).Telegram?.WebApp
     if (!tg) {
+      setUser((prev) => ({
+        ...prev,
+        id: 999999,
+        name: 'Демо Игрок',
+        username: '@demo',
+        initials: 'ДМ',
+        avatarColor: defaultAvatarColors[2],
+        dollars: 15000,
+        elo: 1200,
+        influence: 450,
+      }))
       setLoading(false)
       fetchTables()
       return
@@ -93,15 +116,39 @@ export default function SyndicateApp() {
               initials,
               avatarColor: defaultAvatarColors[Math.abs(data.user.id) % defaultAvatarColors.length],
               photoUrl: data.user.photo_url || undefined,
-              dollars: data.user.dollars,
-              elo: data.user.elo,
-              influence: data.user.influence,
+              dollars: data.user.dollars ?? 15000,
+              elo: data.user.elo ?? 1200,
+              influence: data.user.influence ?? 450,
             })
           }
         })
-        .catch((err) => console.error('Auth API Error:', err))
+        .catch((err) => {
+          console.error('Auth API Error:', err)
+          setUser((prev) => ({
+            ...prev,
+            id: 999999,
+            name: 'Гость',
+            username: '@guest',
+            initials: 'ГС',
+            avatarColor: defaultAvatarColors[0],
+            dollars: 15000,
+            elo: 1200,
+            influence: 450,
+          }))
+        })
         .finally(() => setLoading(false))
     } else {
+      setUser((prev) => ({
+        ...prev,
+        id: 999999,
+        name: 'Гость',
+        username: '@guest',
+        initials: 'ГС',
+        avatarColor: defaultAvatarColors[0],
+        dollars: 15000,
+        elo: 1200,
+        influence: 450,
+      }))
       setLoading(false)
     }
 
@@ -113,6 +160,20 @@ export default function SyndicateApp() {
     const timer = window.setTimeout(() => setToast(''), 2400)
     return () => window.clearTimeout(timer)
   }, [toast])
+
+  useEffect(() => {
+    fetchTables()
+    if (lobby) fetchLobbyPlayers(lobby.id)
+    const interval = window.setInterval(() => {
+      if (!lobby) {
+        fetchTables()
+      } else {
+        fetchLobbyPlayers(lobby.id)
+        fetchTables()
+      }
+    }, 5000)
+    return () => window.clearInterval(interval)
+  }, [lobby])
 
   // Хэндлер создания нового стола
   const handleCreateTable = async (filters: { bet: number; players: number; mode: string; deck: string; turnTime: number }) => {
@@ -132,11 +193,60 @@ export default function SyndicateApp() {
       const data = await res.json()
       if (data.table) {
         setLobby(data.table)
+        setLobbyPlayers([])
         setToast(`Стол на ${data.table.bet} $ создан!`)
         fetchTables()
       }
     } catch (err) {
       console.error('Create Table Error:', err)
+    }
+  }
+
+  // Хэндлер выхода из стола
+  const handleLeaveTable = async () => {
+    if (!lobby) return
+    try {
+      await fetch('/api/tables/leave', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tableId: lobby.id,
+          userId: user.id,
+          isCreator: lobby.creator_id === user.id,
+        }),
+      })
+      setToast('Вы вышли из-за стола')
+    } catch (err) {
+      console.error('Leave Table Error:', err)
+    }
+    setLobby(null)
+    setLobbyPlayers([])
+    fetchTables()
+  }
+
+  // Хэндлер подключения к столу
+  const handleJoinTable = async (table: Table) => {
+    try {
+      if (table.creator_id !== user.id && table.current_players < table.max_players) {
+        const res = await fetch('/api/tables/join', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tableId: table.id, userId: user.id }),
+        })
+        const data = await res.json()
+        if (data.table) {
+          table = data.table
+        }
+      }
+      setLobby(table)
+      setLobbyPlayers([])
+      fetchLobbyPlayers(table.id)
+      setToast(`Вошли за стол ${table.bet} $`)
+      fetchTables()
+    } catch (err) {
+      console.error('Join Table Error:', err)
+      setLobby(table)
+      setToast(`Вошли за стол ${table.bet} $`)
     }
   }
 
@@ -151,8 +261,7 @@ export default function SyndicateApp() {
       const data = await res.json()
 
       if (data.table) {
-        setLobby(data.table)
-        setToast(`Стол на ${data.table.bet} $ найден!`)
+        await handleJoinTable(data.table)
       } else {
         setToast('Подходящих столов не найдено')
       }
@@ -175,7 +284,7 @@ export default function SyndicateApp() {
         <Header user={user} onMenu={() => setToast('Меню профиля скоро будет доступно')} />
         
         {lobby ? (
-          <TableLobby user={user} table={lobby} onBack={() => { setLobby(null); fetchTables() }} />
+          <TableLobby user={user} table={lobby} players={lobbyPlayers} onBack={handleLeaveTable} isCreator={lobby.creator_id === user.id} />
         ) : tab === 'play' ? (
           <PlayScreen 
             user={user} 
@@ -183,10 +292,7 @@ export default function SyndicateApp() {
             stats={stats}
             onSearch={() => setModal('search')} 
             onCreate={() => setModal('create')} 
-            onJoin={(table) => {
-              setLobby(table)
-              setToast(`Вошли за стол ${table.bet} $`)
-            }} 
+            onJoin={handleJoinTable} 
           />
         ) : tab === 'profile' ? (
           <ProfileScreen user={user} />
