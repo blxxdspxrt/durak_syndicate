@@ -526,7 +526,7 @@ export default function SyndicateApp() {
     username: '@player',
     initials: 'PL',
     avatarColor: defaultAvatarColors[0],
-    dollars: null,
+    dollars: 99999,
     elo: null,
     influence: null,
   })
