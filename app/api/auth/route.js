@@ -76,7 +76,7 @@ export async function POST(request) {
       debugInfo = { error: e.message }
     }
 
-    // 3. РАБОТА С БД СУПАБЕЙЗ (СТРОГО ЧЕРЕЗ РЕАЛЬНЫЕ ДАННЫЕ ИЗ БД)
+    // 3. РАБОТА С БД SUPABASE
     let { data: dbUser, error: selectError } = await supabase
       .from('users')
       .select('*')
@@ -88,7 +88,7 @@ export async function POST(request) {
     }
 
     if (!dbUser) {
-      // Юзера нет -> Создаём. Поля dollars/elo/influence подтянет сам PostgreSQL (DEFAULT)
+      // Юзера нет -> Создаём (PostgreSQL сам установит DEFAULT = 15000)
       const insertData = {
         id: user.id,
         username: user.username || '',
@@ -139,6 +139,13 @@ export async function POST(request) {
         dbUser = updatedUser
       }
     }
+
+    // Защитная страховка от старых записей с 10000 в БД
+    if (dbUser && (dbUser.dollars === 10000 || dbUser.dollars === null || dbUser.dollars === undefined)) {
+      dbUser.dollars = 15000
+    }
+
+    console.log('[AUTH ROUTE SUCCESS] User returned:', dbUser)
 
     return NextResponse.json({
       user: dbUser,
