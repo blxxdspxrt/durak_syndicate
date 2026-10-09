@@ -78,7 +78,6 @@ export async function POST(request) {
     }
 
     // 3. Сохранение/обновление в Supabase
-    // Собираем объект: если photoUrl скачался — пишем его, если нет — не передаем поле вообще (чтобы не затереть уже сохраненный Base64 на пустую строку)
     const upsertData = {
       id: user.id,
       username: user.username || '',
@@ -91,23 +90,22 @@ export async function POST(request) {
       upsertData.photo_url = photoUrl;
     }
 
+    // Сначала проверяем, есть ли уже этот пользователь в базе
+    const { data: existingUser } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    if (!existingUser) {
+      // Если пользователя нет — гарантированно прописываем стартовый баланс 15000
+      upsertData.dollars = 15000;
+      upsertData.elo = 1200;
+      upsertData.influence = 450;
+    }
+
     const { data: dbUser, error: dbError } = await supabase
       .from('users')
       .upsert(upsertData, { onConflict: 'id' })
       .select()
       .single();
-
-    if (dbError) {
-      console.error('Supabase DB Error:', dbError);
-      return NextResponse.json({ error: 'Database sync failed', details: dbError.message }, { status: 500 });
-    }
-
-    return NextResponse.json({
-      user: dbUser,
-      debug: debugInfo
-    });
-
-  } catch (err) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
-  }
-}
