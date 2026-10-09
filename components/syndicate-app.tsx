@@ -512,7 +512,7 @@ export default function SyndicateApp() {
     influence: 450,
   })
 
- useEffect(() => {
+useEffect(() => {
   if (typeof window === 'undefined') return
 
   const tg = (window as any).Telegram?.WebApp
@@ -520,6 +520,28 @@ export default function SyndicateApp() {
   if (tg) {
     tg.ready()
     tg.expand()
+
+    const tgUser = tg.initDataUnsafe?.user
+
+    if (tgUser) {
+      const fullName = `${tgUser.first_name || ''} ${tgUser.last_name || ''}`.trim() || tgUser.username || 'Игрок'
+      const initials = fullName
+        .split(' ')
+        .map((n: string) => n[0])
+        .join('')
+        .substring(0, 2)
+        .toUpperCase() || 'PL'
+
+      setUser((prev) => ({
+        ...prev,
+        id: tgUser.id,
+        name: fullName,
+        username: tgUser.username ? `@${tgUser.username}` : '@no_username',
+        initials: initials,
+        photoUrl: tgUser.photo_url || prev.photoUrl,
+        avatarColor: defaultAvatarColors[Math.abs(tgUser.id) % defaultAvatarColors.length],
+      }))
+    }
 
     if (tg.initData) {
       fetch('/api/auth', {
@@ -538,28 +560,26 @@ export default function SyndicateApp() {
               .substring(0, 2)
               .toUpperCase() || 'PL'
 
-            setUser({
+            setUser((prev) => ({
+              ...prev,
               id: data.user.id,
               name: fullName,
               username: data.user.username ? `@${data.user.username}` : '@no_username',
               initials: initials,
               avatarColor: defaultAvatarColors[Math.abs(data.user.id) % defaultAvatarColors.length],
-              photoUrl: data.user.photo_url || undefined,
-              // Читаем ЧИСТЫЕ данные из Supabase без фоллбеков на хардкод:
-              dollars: data.user.dollars,
-              elo: data.user.elo,
-              influence: data.user.influence,
-            })
+              // Берём Base64 аватар из БД, если он там есть:
+              photoUrl: data.user.photo_url || prev.photoUrl,
+              // Берём актуальный баланс и рейтинг из БД вместо хардкода:
+              dollars: data.user.dollars ?? prev.dollars,
+              elo: data.user.elo ?? prev.elo,
+              influence: data.user.influence ?? prev.influence,
+            }))
           }
         })
         .catch((err) => console.error('Auth API Error:', err))
-        .finally(() => setLoading(false))
-    } else {
-      setLoading(false)
     }
-  } else {
-    setLoading(false)
   }
+  setLoading(false)
 }, [])
 
   useEffect(() => {
