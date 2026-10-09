@@ -10,6 +10,7 @@ import { ShopScreen } from '@/components/screens/shop-screen'
 import { TopScreen } from '@/components/screens/top-screen'
 import { TableLobby } from '@/components/table-lobby'
 import { Stats, Tab, Table, UserData } from '@/types'
+import { supabase } from '@/lib/supabase'
 
 const defaultAvatarColors = [
   'from-sky-400 to-blue-700',
@@ -68,7 +69,7 @@ export default function SyndicateApp() {
     try {
       const res = await fetch(`/api/tables/${tableId}`)
       const data = await res.json()
-      
+
       if (data.players && Array.isArray(data.players)) {
         setLobbyPlayers(data.players)
       }
@@ -80,7 +81,7 @@ export default function SyndicateApp() {
     }
   }
 
-  // Авторизация WebApp и инициализация пользователя
+  // 1. Инициализация пользователя при старте WebApp
   useEffect(() => {
     if (typeof window === 'undefined') return
     const tg = (window as any).Telegram?.WebApp
@@ -148,28 +149,58 @@ export default function SyndicateApp() {
     fetchTables()
   }, [])
 
-  // Автоматический скрытый тост
+  // Автоматическое скрытие уведомления
   useEffect(() => {
     if (!toast) return
     const timer = window.setTimeout(() => setToast(''), 2400)
     return () => window.clearTimeout(timer)
   }, [toast])
 
-  // Периодический поллинг стола и игроков
+  // 2. SUPABASE REALTIME: WebSocket подписка на изменения списка столов
   useEffect(() => {
     fetchTables()
-    if (lobby) fetchLobbyPlayers(lobby.id)
 
-    const interval = window.setInterval(() => {
-      if (!lobby) {
-        fetchTables()
-      } else {
-        fetchLobbyPlayers(lobby.id)
-        fetchTables()
-      }
-    }, 3000)
+    const tablesChannel = supabase
+      .channel('realtime_tables')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'tables' },
+        () => {
+          fetchTables()
+        }
+      )
+      .subscribe()
 
-    return () => window.clearInterval(interval)
+    return () => {
+      supabase.removeChannel(tablesChannel)
+    }
+  }, [])
+
+  // 3. SUPABASE REALTIME: WebSocket подписка на игроков конкретного стола
+  useEffect(() => {
+    if (!lobby?.id) return
+
+    fetchLobbyPlayers(lobby.id)
+
+    const lobbyChannel = supabase
+      .channel(`table_players_${lobby.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'table_players',
+          filter: `table_id=eq.${lobby.id}`,
+        },
+        () => {
+          fetchLobbyPlayers(lobby.id)
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(lobbyChannel)
+    }
   }, [lobby?.id])
 
   // Создание стола
