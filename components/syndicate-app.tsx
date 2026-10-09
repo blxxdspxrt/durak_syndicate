@@ -192,24 +192,7 @@ export default function SyndicateApp() {
       })
       const data = await res.json()
       if (data.table) {
-        const isSyndicate = data.table.mode === 'Синдикат'
         setLobby(data.table)
-        setLobbyPlayers([
-          {
-            id: 'local-creator',
-            table_id: data.table.id,
-            user_id: user.id,
-            seat_number: 1,
-            team: 1,
-            user: {
-              id: user.id,
-              username: user.username || '',
-              first_name: user.name.split(' ')[0] || user.name,
-              last_name: user.name.split(' ')[1] || '',
-              photo_url: user.photoUrl,
-            },
-          },
-        ])
         setToast(`Стол на ${data.table.bet} $ создан!`)
         fetchTables()
         setTimeout(() => fetchLobbyPlayers(data.table.id), 400)
@@ -241,7 +224,7 @@ export default function SyndicateApp() {
     fetchTables()
   }
 
-// Хэндлер подключения к столу
+  // Хэндлер подключения к столу (чистый, без старых хвостов)
   const handleJoinTable = async (table: Table) => {
     try {
       if (table.creator_id !== user.id && table.current_players < table.max_players) {
@@ -257,91 +240,13 @@ export default function SyndicateApp() {
       setLobby(table)
       setToast(`Вошли за стол ${table.bet} $`)
 
-      // Сразу выкачиваем настоящий состав игроков из БД
+      // Выкачиваем реальный состав из Supabase
       fetchLobbyPlayers(table.id)
       fetchTables()
     } catch (err) {
       console.error('Join Table Error:', err)
       setLobby(table)
       fetchLobbyPlayers(table.id)
-    }
-  }
-      const isCreatorOfThis = table.creator_id === user.id
-      const isSyndicate = table.mode === 'Синдикат'
-      const localSeat = isCreatorOfThis ? 1 : table.current_players
-
-      let creatorUserObj: any = null
-      if (!isCreatorOfThis && table.creator_id) {
-        try {
-          const creatorRes = await fetch(`/api/users/${table.creator_id}`)
-          const creatorData = await creatorRes.json()
-          if (creatorData && creatorData.user) {
-            creatorUserObj = {
-              id: creatorData.user.id,
-              username: creatorData.user.username || '',
-              first_name: creatorData.user.first_name || `Игрок_${creatorData.user.id}`,
-              last_name: creatorData.user.last_name || '',
-              photo_url: creatorData.user.photo_url || undefined,
-            }
-          }
-        } catch (creatorErr) {
-          console.warn('Не удалось получить инфо о создателе:', (creatorErr as Error).message)
-        }
-      }
-
-      const basePlayers = []
-      if (isCreatorOfThis || table.creator_id) {
-        basePlayers.push({
-          id: 'local-creator',
-          table_id: table.id,
-          user_id: table.creator_id,
-          seat_number: 1,
-          team: 1,
-          user: isCreatorOfThis
-            ? {
-                id: user.id,
-                username: user.username || '',
-                first_name: user.name.split(' ')[0] || user.name,
-                last_name: user.name.split(' ')[1] || '',
-                photo_url: user.photoUrl,
-              }
-            : creatorUserObj || {
-                id: table.creator_id,
-                username: '',
-                first_name: `Игрок_${table.creator_id}`,
-                last_name: '',
-                photo_url: undefined,
-              },
-        })
-      }
-
-      if (!isCreatorOfThis) {
-        let freeSeat = 2
-        basePlayers.push({
-          id: 'local-me',
-          table_id: table.id,
-          user_id: user.id,
-          seat_number: freeSeat,
-          team: isSyndicate ? (freeSeat % 2 === 1 ? 1 : 2) : 1,
-          user: {
-            id: user.id,
-            username: user.username || '',
-            first_name: user.name.split(' ')[0] || user.name,
-            last_name: user.name.split(' ')[1] || '',
-            photo_url: user.photoUrl,
-          },
-        })
-      }
-
-      setLobby(table)
-      setLobbyPlayers(basePlayers)
-      setToast(`Вошли за стол ${table.bet} $`)
-      fetchTables()
-      setTimeout(() => fetchLobbyPlayers(table.id), 400)
-    } catch (err) {
-      console.error('Join Table Error:', err)
-      setLobby(table)
-      setToast(`Вошли за стол ${table.bet} $`)
     }
   }
 
