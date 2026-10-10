@@ -30,6 +30,40 @@ export function GameScreen({
   const trumpCard = gameState?.trump_card
   const deckCount = gameState?.deck?.length || 0
 
+  // 👇 ОТПРАВКА ХОДА НА БЭКЕНД
+  const handleCardClick = async (card: any) => {
+    // Определяем действие: если я атакующий — attack, если защищающийся — defend
+    const isAttacker = gameState.attacker_id === user.id
+    const action = isAttacker ? 'attack' : 'defend'
+
+    // Визуально выделяем карту
+    setSelectedCard(card.id)
+
+    try {
+      const res = await fetch('/api/games/move', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tableId: gameState.table_id,
+          userId: user.id,
+          action,
+          card,
+          targetPairIndex: 0, // По умолчанию для первой незакрытой карты
+        }),
+      })
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        console.error('Card Move Error:', data.error || res.statusText)
+        // Снимаем выделение, если ход не принят
+        setSelectedCard(null)
+      }
+    } catch (err) {
+      console.error('Card Move Error:', err)
+      setSelectedCard(null)
+    }
+  }
+
   return (
     <div className="relative flex h-[calc(100vh-80px)] flex-col justify-between overflow-hidden bg-emerald-950 p-3 select-none">
       {/* Шапка Игрового Стола */}
@@ -98,7 +132,7 @@ export function GameScreen({
             return (
               <button
                 key={card.id}
-                onClick={() => setSelectedCard(card.id)}
+                onClick={() => handleCardClick(card)}
                 className={`relative flex h-24 w-16 flex-col justify-between rounded-xl border p-1.5 transition-all duration-200 shadow-xl ${
                   isSelected
                     ? '-translate-y-4 border-amber-400 bg-amber-50 shadow-amber-500/50'
