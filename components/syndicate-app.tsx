@@ -175,7 +175,7 @@ export default function SyndicateApp() {
     }
   }, [])
 
-  // 👇 REALTIME ЛОББИ + ИГРОВОЕ СОСТОЯНИЕ
+  // 👇 REALTIME ЛОББИ + СТАТУС СТОЛА + ИГРОВОЕ СОСТОЯНИЕ
   useEffect(() => {
     if (!lobby?.id) {
       setGameState(null)
@@ -185,7 +185,27 @@ export default function SyndicateApp() {
     fetchLobbyPlayers(lobby.id)
     fetchGameState(lobby.id)
 
-    // Канал игроков
+    // 1. Слушаем изменения самого стола (например, статус in_game)
+    const tableChannel = supabase
+      .channel(`table_status_${lobby.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'tables',
+          filter: `id=eq.${lobby.id}`,
+        },
+        (payload) => {
+          console.log('⚡ Статус стола изменился:', payload.new)
+          if (payload.new) {
+            setLobby((prev) => (prev ? { ...prev, ...payload.new } : null))
+          }
+        }
+      )
+      .subscribe()
+
+    // 2. Слушаем изменения игроков
     const lobbyChannel = supabase
       .channel(`table_players_${lobby.id}`)
       .on(
@@ -197,19 +217,20 @@ export default function SyndicateApp() {
       )
       .subscribe()
 
-    // Канал игровых ходов / состояния стола
+    // 3. Слушаем изменения игрового состояния (карты, ходы)
     const gameChannel = supabase
       .channel(`game_state_${lobby.id}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'game_states', filter: `table_id=eq.${lobby.id}` },
         (payload) => {
-          setGameState(payload.new)
+          if (payload.new) setGameState(payload.new)
         }
       )
       .subscribe()
 
     return () => {
+      supabase.removeChannel(tableChannel)
       supabase.removeChannel(lobbyChannel)
       supabase.removeChannel(gameChannel)
     }
@@ -302,9 +323,9 @@ export default function SyndicateApp() {
       <div className="club-frame">
         <Header user={user} onMenu={() => setToast('Меню профиля скоро будет доступно')} />
 
-        {/* 👇 ИЗМЕНЁННЫЙ БЛОК РЕНДЕРА: LOBBY → GAME_SCREEN → LOBBY */}
+        {/* 👇 LOBBY → GAME_SCREEN → LOBBY (по статусу стола) */}
         {lobby ? (
-          lobby.status === 'in_game' && gameState ? (
+          lobby.status === 'in_game' ? (
             <GameScreen
               user={user}
               gameState={gameState}
