@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase-admin'
 import { authenticateRequest } from '@/lib/telegram-auth'
+import { evictUserFromOtherTables, seatPlayer } from '@/lib/presence'
 
 // POST /api/tables/join — посадить игрока за стол.
 // userId берётся из подписанного Telegram initData, а не из тела запроса.
@@ -46,6 +47,18 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Игра уже началась' }, { status: 403 })
     }
 
+    // 3.1. Бай-ин должен быть обеспечен балансом
+    const bet = Number(currentTable.bet) || 0
+    const { data: wallet } = await supabaseAdmin
+      .from('users')
+      .select('dollars')
+      .eq('id', numericUserId)
+      .maybeSingle()
+
+    if (wallet && Number(wallet.dollars || 0) < bet) {
+      return NextResponse.json({ error: 'Недостаточно средств для этой ставки' }, { status: 400 })
+    }
+
     // 4. Уже сидит?
     const { data: existingPlayer } = await supabaseAdmin
       .from('table_players')
@@ -57,6 +70,9 @@ export async function POST(request) {
     if (existingPlayer) {
       return NextResponse.json({ table: currentTable, alreadySeated: true })
     }
+
+    // 4.1. Один игрок — один стол: выходим из всех прежних столов.
+    await evictUserFromOtherTables(numericUserId, tableId)
 
     // 5. Свободные места
     const { data: existingPlayers } = await supabaseAdmin
@@ -85,16 +101,12 @@ export async function POST(request) {
     }
 
     // 7. Сажаем игрока
-    const { data: insertedPlayer, error: insertError } = await supabaseAdmin
-      .from('table_players')
-      .insert({
-        table_id: tableId,
-        user_id: numericUserId,
-        seat_number: seatNumber,
-        team,
-      })
-      .select()
-      .single()
+    const { data: insertedPlayer, error: insertError } = await seatPlayer({
+      table_id: tableId,
+      user_id: numericUserId,
+      seat_number: seatNumber,
+      team,
+    })
 
     if (insertError) {
       console.error('[JOIN INSERT ERROR]:', insertError)

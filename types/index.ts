@@ -25,7 +25,9 @@ export type Table = {
 }
 
 export type Stats = {
+  /** Уникальные игроки, реально сидящие за активными столами (счётчик «Играет»). */
   onlinePlayers: number
+  /** Столы, в которых есть хотя бы один живой игрок. */
   activeTables: number
   avgTurn: string
   multiplier: string

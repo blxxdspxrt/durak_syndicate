@@ -67,8 +67,8 @@ export function PlayScreen({
       {/* Статистика режима */}
       <div className="grid grid-cols-3 gap-2 text-center">
         <div className="rounded-xl border border-white/10 bg-slate-900/60 p-2.5 backdrop-blur-sm">
-          <p className="text-[10px] uppercase text-slate-400">В сети</p>
-          <p className="mt-0.5 text-sm font-bold text-white">{stats.onlinePlayers} игр.</p>
+          <p className="text-[10px] uppercase text-slate-400">Играет</p>
+          <p className="mt-0.5 text-sm font-bold text-white">{stats.onlinePlayers}</p>
         </div>
         <div className="rounded-xl border border-white/10 bg-slate-900/60 p-2.5 backdrop-blur-sm">
           <p className="text-[10px] uppercase text-slate-400">Столов</p>
@@ -117,13 +117,19 @@ export function PlayScreen({
                   <span className="text-xs text-slate-300 font-mono">
                     {t.current_players}/{t.max_players}
                   </span>
-                  <Button
-                    onClick={() => onJoin(t)}
-                    size="sm"
-                    className="h-8 bg-blue-600 text-xs hover:bg-blue-500 text-white"
-                  >
-                    Сесть
-                  </Button>
+                  {t.status === 'waiting' && t.current_players < t.max_players ? (
+                    <Button
+                      onClick={() => onJoin(t)}
+                      size="sm"
+                      className="h-8 bg-blue-600 text-xs hover:bg-blue-500 text-white"
+                    >
+                      Сесть
+                    </Button>
+                  ) : (
+                    <span className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-amber-300">
+                      {t.status === 'waiting' ? 'Заполнен' : 'Идет игра'}
+                    </span>
+                  )}
                 </div>
               </div>
             ))}

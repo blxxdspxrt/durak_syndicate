@@ -22,6 +22,9 @@ const PERSIST_FIELDS = [
   'turn_deadline',
   'mode',
   'teams',
+  'finish_order',
+  'placement',
+  'even_split',
 ]
 
 // Собираем patch только из тех колонок, что реально есть в БД

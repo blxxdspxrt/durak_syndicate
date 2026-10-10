@@ -1,33 +1,26 @@
 import { NextResponse } from 'next/server'
-import { supabaseAdmin as supabase } from '@/lib/supabase-admin'
+import { sweepAndLoadLobby } from '@/lib/presence'
 
+// POST /api/tables/quick-search — подобрать стол с реальными свободными местами.
+// Используем актуальную (пересчитанную) сводку, а не «раздутые» счётчики.
 export async function POST(request) {
   try {
-    const body = await request.json()
+    const body = await request.json().catch(() => ({}))
     const { bet, mode, deck } = body
 
-    // Ищем подходящий открытый стол с имеющимися свободными местами
-    let query = supabase
-      .from('tables')
-      .select('*')
-      .eq('status', 'waiting')
+    const { tables } = await sweepAndLoadLobby()
 
-    if (mode) query = query.eq('mode', mode)
-    if (deck) query = query.eq('deck', deck)
+    const candidates = (tables || []).filter((t) => {
+      if (t.status !== 'waiting') return false
+      if (mode && t.mode !== mode) return false
+      if (deck && t.deck !== deck) return false
+      return Number(t.current_players) < Number(t.max_players)
+    })
 
-    const { data: foundTables, error } = await query
+    // Сначала стол с подходящей ставкой, иначе — просто первый свободный.
+    const byBet = bet == null ? [] : candidates.filter((t) => Number(t.bet) === Number(bet))
 
-    if (error) throw error
-
-    // Фильтруем те, где current_players < max_players
-    const availableTable = foundTables?.find((t) => t.current_players < t.max_players)
-
-    if (availableTable) {
-      return NextResponse.json({ table: availableTable })
-    }
-
-    // Если ничего не нашли — отдаем первый попавшийся или null
-    return NextResponse.json({ table: foundTables?.[0] || null })
+    return NextResponse.json({ table: byBet[0] || candidates[0] || null })
   } catch (err) {
     return NextResponse.json({ error: err.message }, { status: 500 })
   }

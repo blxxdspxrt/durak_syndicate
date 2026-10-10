@@ -233,6 +233,50 @@ export default function SyndicateApp() {
     }
   }, [lobby?.id, user.id])
 
+  // 👇 ПУЛЬС ПРИСУТСТВИЯ (мониторинг 24/7): раз в секунду сообщаем серверу,
+  // что мы за столом. Сервер чистит «призраков» и возвращает актуальные столы
+  // и счётчик «Играет». Если наш стол самоликвидировался (все вышли) или нас
+  // вытеснили — приходит removed:true, и мы автоматически уходим в лобби.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (!user.id) return
+
+    let cancelled = false
+
+    const ping = async () => {
+      try {
+        const res = await fetch('/api/tables/heartbeat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            tableId: lobby?.id || null,
+            userId: user.id,
+            initData: getInitData(),
+          }),
+        })
+        const data = await res.json()
+        if (cancelled) return
+        if (data.stats) setStats(data.stats)
+        if (Array.isArray(data.tables)) setTables(data.tables)
+        if (data.removed && lobby?.id) {
+          setLobby(null)
+          setLobbyPlayers([])
+          setGameState(null)
+          setToast('Стол закрыт: игроки вышли')
+        }
+      } catch {
+        // сеть мигнула — следующий пульс повторит
+      }
+    }
+
+    ping()
+    const timer = window.setInterval(ping, 1000)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [lobby?.id, user.id])
+
   const handleCreateTable = async (filters: { bet: number; players: number; mode: string; deck: string; turnTime: number }) => {
     try {
       const modeToCreate = tab === 'syndicate' ? 'Синдикат' : filters.mode || 'Переводной'

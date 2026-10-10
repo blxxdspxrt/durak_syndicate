@@ -35,6 +35,10 @@ const PERSIST_FIELDS = [
   'updated_at',
   'first_player_id',
   'roulette_started_at',
+  'finish_order',
+  'placement',
+  'even_split',
+  'settled_at',
 ]
 
 function migrationHint(err) {
@@ -116,6 +120,7 @@ export async function POST(request) {
     for (const field of PERSIST_FIELDS) {
       if (field === 'first_player_id') payload[field] = firstPlayer.user_id
       else if (field === 'roulette_started_at') payload[field] = rouletteStartedAt
+      else if (field === 'settled_at') payload[field] = null // новая партия — расчёт ещё не сделан
       else payload[field] = state[field]
     }
 

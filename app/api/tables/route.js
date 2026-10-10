@@ -1,33 +1,16 @@
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase-admin'
 import { authenticateRequest } from '@/lib/telegram-auth'
+import { sweepAndLoadLobby, evictUserFromOtherTables, seatPlayer } from '@/lib/presence'
 
-// GET: публичный список активных столов и агрегированной статистики.
+// GET: публичный список активных столов и АКТУАЛЬНОЙ статистики.
 // Секретных данных здесь нет — только метаданные лобби.
+// Перед выдачей чистим «призраков» (игроки без свежего пульса) и пересчитываем
+// счётчики из реальных мест: столы с 0 игроков самоликвидируются.
 export async function GET() {
   try {
-    const { data: tablesList, error } = await supabaseAdmin
-      .from('tables')
-      .select('*')
-      .in('status', ['waiting', 'playing', 'in_game'])
-      .order('created_at', { ascending: false })
-
-    if (error) throw error
-
-    const activeTablesCount = tablesList ? tablesList.length : 0
-    const totalOnlinePlayers = tablesList
-      ? tablesList.reduce((acc, t) => acc + (t.current_players || 1), 0)
-      : 0
-
-    return NextResponse.json({
-      tables: tablesList || [],
-      stats: {
-        onlinePlayers: totalOnlinePlayers || 1,
-        activeTables: activeTablesCount,
-        avgTurn: '30с',
-        multiplier: 'x2.4',
-      },
-    })
+    const { tables, stats } = await sweepAndLoadLobby()
+    return NextResponse.json({ tables, stats })
   } catch (err) {
     return NextResponse.json({ error: err.message }, { status: 500 })
   }
@@ -60,6 +43,17 @@ export async function POST(request) {
 
     const betValue = Math.max(0, Math.floor(Number(bet) || 1000))
 
+    // Бай-ин должен быть обеспечен балансом — иначе экономика станет убыточной.
+    const { data: creatorWallet } = await supabaseAdmin
+      .from('users')
+      .select('dollars')
+      .eq('id', numericUserId)
+      .maybeSingle()
+
+    if (creatorWallet && Number(creatorWallet.dollars || 0) < betValue) {
+      return NextResponse.json({ error: 'Недостаточно средств для этой ставки' }, { status: 400 })
+    }
+
     // 1. Создаём стол
     const { data: newTable, error: tableError } = await supabaseAdmin
       .from('tables')
@@ -79,7 +73,7 @@ export async function POST(request) {
     if (tableError) throw tableError
 
     // 2. Создатель садится за 1-е место (для Синдиката — команда 1)
-    const { error: tpError } = await supabaseAdmin.from('table_players').insert({
+    const { error: tpError } = await seatPlayer({
       table_id: newTable.id,
       user_id: numericUserId,
       seat_number: 1,
@@ -92,6 +86,10 @@ export async function POST(request) {
       await supabaseAdmin.from('tables').delete().eq('id', newTable.id)
       return NextResponse.json({ error: tpError.message }, { status: 500 })
     }
+
+    // 3. Один игрок — один стол: убираем его из всех прежних столов
+    //    (кроме только что созданного), иначе он «висит» сразу в нескольких.
+    await evictUserFromOtherTables(numericUserId, newTable.id)
 
     return NextResponse.json({ table: newTable })
   } catch (err) {

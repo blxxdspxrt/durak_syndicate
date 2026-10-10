@@ -82,6 +82,8 @@ export function GameScreen({
   const isAttacker = attackerId === user.id
   const isDefender = defenderId === user.id
   const finished = gameState?.status === 'finished'
+  // Победивший (у кого не осталось карт) — наблюдатель: смотрит партию, но не ходит.
+  const isObserver = !finished && myHand.length === 0
 
   // Таймер хода
   useEffect(() => {
@@ -214,6 +216,9 @@ export function GameScreen({
   if (finished) {
     roleLabel = gameState?.loser_id === user.id ? 'Вы проиграли' : 'Вы победили!'
     roleColor = gameState?.loser_id === user.id ? 'text-rose-400' : 'text-emerald-400'
+  } else if (isObserver) {
+    roleLabel = 'Вы наблюдатель'
+    roleColor = 'text-slate-300'
   } else if (isDefender) {
     roleLabel = 'Вы защищаетесь'
     roleColor = 'text-rose-400'
@@ -228,8 +233,11 @@ export function GameScreen({
     roleColor = 'text-slate-400'
   }
 
-  const canTake = isDefender && phase === 'defend' && !finished
-  const canBito = !isDefender && phase === 'defend' && tableCards.every((p: any) => p.defend) && !finished
+  // «Беру» доступно только если на столе есть хотя бы одна НЕотбитая карта.
+  // Если защитник уже покрыл все карты — брать нечего (сервер тоже отклонит).
+  const allDefended = tableCards.length > 0 && tableCards.every((p: any) => p.attack && p.defend)
+  const canTake = isDefender && phase === 'defend' && !allDefended && !finished && !isObserver
+  const canBito = !isDefender && phase === 'defend' && allDefended && !finished && !isObserver
 
   const opponents = players.filter((p) => Number(p.user_id) !== user.id)
 
@@ -391,7 +399,9 @@ export function GameScreen({
             )
           })}
           {myHand.length === 0 && (
-            <span className="py-8 text-xs text-emerald-600">У вас нет карт</span>
+            <span className="py-8 text-xs text-emerald-500">
+              {isObserver ? 'Наблюдатель — вы уже вышли из партии' : 'У вас нет карт'}
+            </span>
           )}
         </div>
 

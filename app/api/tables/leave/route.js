@@ -1,9 +1,19 @@
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase-admin'
 import { authenticateRequest } from '@/lib/telegram-auth'
+import { refreshTableCount, reassignOwner } from '@/lib/presence'
+import { abortGame } from '@/lib/game-engine'
+import { settleGame } from '@/lib/game-settle'
 
 // POST /api/tables/leave — выйти из-за стола.
-// Флаг isCreator из тела НЕ используется — создатель определяется по creator_id в БД.
+// Флаг isCreator из тела НЕ используется — владелец определяется по creator_id в БД.
+//
+// Правила:
+//  • если выходит игрок, который ещё В ИГРЕ (у него есть карты) — партия
+//    досрочно завершается, а он признаётся проигравшим (приз поровну остальным);
+//  • если выходит уже победивший наблюдатель — партия продолжается;
+//  • владелец ушёл, а игроки остались — права переходят случайному игроку;
+//  • владелец был один за столом — стол ликвидируется.
 export async function POST(request) {
   try {
     const body = await request.json()
@@ -30,10 +40,45 @@ export async function POST(request) {
       return NextResponse.json({ table: null, deleted: true })
     }
 
-    // Создатель — только тот, кто реально создал стол
-    const isCreator = Number(currentTable.creator_id) === numericUserId
+    const isOwner = Number(currentTable.creator_id) === numericUserId
 
-    // Убираем место игрока
+    // 1. Досрочное завершение партии, если выходит «живой» игрок
+    const { data: gameState } = await supabaseAdmin
+      .from('game_states')
+      .select('*')
+      .eq('table_id', tableId)
+      .maybeSingle()
+
+    let aborted = false
+    if (gameState && gameState.status === 'playing') {
+      const hand = (gameState.hands || {})[String(numericUserId)] || []
+      const inGame = (gameState.turn_order || []).map(Number).includes(numericUserId)
+
+      // Наблюдатель (уже вышел из партии) просто покидает стол — игра идёт дальше.
+      if (inGame && hand.length > 0) {
+        const { state: abortedState } = abortGame(gameState, { loserIds: [numericUserId] })
+
+        await supabaseAdmin
+          .from('game_states')
+          .update({
+            status: 'finished',
+            loser_id: abortedState.loser_id,
+            loser_ids: abortedState.loser_ids,
+            winner_id: abortedState.winner_id,
+            winner_ids: abortedState.winner_ids,
+            placement: null,
+            even_split: true,
+            turn_deadline: null,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('table_id', tableId)
+
+        await settleGame(tableId, abortedState)
+        aborted = true
+      }
+    }
+
+    // 2. Убираем место игрока
     const { error: delPlayerErr } = await supabaseAdmin
       .from('table_players')
       .delete()
@@ -44,39 +89,40 @@ export async function POST(request) {
       console.warn('[LEAVE] table_players delete warning:', delPlayerErr.message)
     }
 
-    // Создатель уходит — удаляем стол целиком (вместе с игровым состоянием)
-    if (isCreator) {
-      await supabaseAdmin.from('game_states').delete().eq('table_id', tableId)
-      await supabaseAdmin.from('table_players').delete().eq('table_id', tableId)
-      const { error: deleteError } = await supabaseAdmin.from('tables').delete().eq('id', tableId)
-      if (deleteError) throw deleteError
+    // 3. Пересчитываем состав. Стол без игроков удаляется целиком.
+    const remaining = await refreshTableCount(tableId)
+    if (remaining === 0) {
       return NextResponse.json({ table: null, deleted: true })
     }
 
-    // Остальные места
-    const { data: remaining } = await supabaseAdmin
-      .from('table_players')
-      .select('user_id')
-      .eq('table_id', tableId)
-
-    const newCount = (remaining || []).length
-
-    if (newCount === 0) {
-      await supabaseAdmin.from('game_states').delete().eq('table_id', tableId)
-      await supabaseAdmin.from('tables').delete().eq('id', tableId)
-      return NextResponse.json({ table: null, deleted: true })
+    // 4. Владелец ушёл → права переходят СЛУЧАЙНОМУ оставшемуся игроку
+    let newOwnerId = null
+    if (isOwner) {
+      newOwnerId = await reassignOwner(tableId, numericUserId)
     }
 
-    const { data: updatedTable, error: updateError } = await supabaseAdmin
-      .from('tables')
-      .update({ current_players: newCount, status: 'waiting' })
-      .eq('id', tableId)
-      .select()
-      .single()
+    // 5. Если партия больше не идёт — стол возвращается в лобби, а оставшиеся
+    //    игроки ждут новых участников, чтобы начать следующую игру.
+    const gameStillRunning = gameState && gameState.status === 'playing' && !aborted
 
-    if (updateError) throw updateError
+    let updatedTable = {
+      ...currentTable,
+      creator_id: newOwnerId != null ? newOwnerId : currentTable.creator_id,
+    }
 
-    return NextResponse.json({ table: updatedTable, deleted: false })
+    if (!gameStillRunning) {
+      const { data: upd, error: updateError } = await supabaseAdmin
+        .from('tables')
+        .update({ status: 'waiting' })
+        .eq('id', tableId)
+        .select()
+        .single()
+
+      if (updateError) throw updateError
+      updatedTable = upd
+    }
+
+    return NextResponse.json({ table: updatedTable, deleted: false, newOwnerId, aborted })
   } catch (err) {
     return NextResponse.json({ error: err.message }, { status: 500 })
   }

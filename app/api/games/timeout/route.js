@@ -19,6 +19,11 @@ const PERSIST_FIELDS = [
   'winner_ids',
   'loser_ids',
   'turn_deadline',
+  'mode',
+  'teams',
+  'finish_order',
+  'placement',
+  'even_split',
 ]
 
 function buildUpdate(newState, template) {
