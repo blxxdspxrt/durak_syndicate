@@ -45,12 +45,14 @@ export function TableLobby({
   players = [],
   onBack,
   isCreator = false,
+  onStartGame,
 }: {
   user: UserData
   table: Table
   players?: LobbyPlayer[]
   onBack: () => void
   isCreator?: boolean
+  onStartGame?: (updatedTable: Table) => void
 }) {
   const [spinning, setSpinning] = useState(false)
   const [winner, setWinner] = useState('')
@@ -171,7 +173,7 @@ export function TableLobby({
     }, 2200)
   }
 
-  // 👇 ЗАМЕНЕНО НА ЗАПРОС К БЭКЕНДУ
+  // 👇 ЗАПРОС К БЭКЕНДУ + МГНОВЕННОЕ ОБНОВЛЕНИЕ ЛОББИ
   const startGame = async () => {
     try {
       setGameStarting(true)
@@ -188,6 +190,10 @@ export function TableLobby({
       if (!res.ok) {
         console.error('Start Game Error:', data.error)
         setGameStarting(false)
+        alert(data.error || 'Ошибка старта игры')
+      } else if (data.table) {
+        // Мгновенно обновляем локальный стейт стола
+        if (onStartGame) onStartGame(data.table)
       }
     } catch (err) {
       console.error('Start Game Request Error:', err)

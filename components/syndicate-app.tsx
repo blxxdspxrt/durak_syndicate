@@ -318,6 +318,10 @@ export default function SyndicateApp() {
               players={lobbyPlayers}
               onBack={handleLeaveTable}
               isCreator={lobby.creator_id === user.id}
+              onStartGame={(updatedTable) => {
+                setLobby(updatedTable)
+                fetchGameState(updatedTable.id)
+              }}
             />
           )
         ) : tab === 'classic' || tab === 'syndicate' ? (
