@@ -1,34 +1,37 @@
 import { NextResponse } from 'next/server'
-import { supabase } from '@/lib/supabase'
+import { supabaseAdmin } from '@/lib/supabase-admin'
+import { authenticateRequest } from '@/lib/telegram-auth'
 
+// POST /api/tables/join — посадить игрока за стол.
+// userId берётся из подписанного Telegram initData, а не из тела запроса.
 export async function POST(request) {
   try {
     const body = await request.json()
-    const { tableId, userId } = body
+    const { tableId, userId, initData } = body
 
-    console.log('[JOIN ATTEMPT]', { tableId, userId })
+    const auth = authenticateRequest(initData, userId)
+    if (auth.error) {
+      return NextResponse.json({ error: auth.error }, { status: 401 })
+    }
+    const numericUserId = auth.userId
 
-    if (!tableId || !userId || Number(userId) === 0) {
-      console.error('[JOIN ERROR] Invalid parameters:', { tableId, userId })
-      return NextResponse.json({ error: 'Valid tableId and userId are required' }, { status: 400 })
+    if (!tableId) {
+      return NextResponse.json({ error: 'tableId is required' }, { status: 400 })
     }
 
-    const numericUserId = Number(userId)
-
-    // 1. Проверяем существование пользователя в базе
-    const { data: dbUser, error: userErr } = await supabase
+    // 1. Игрок должен существовать в БД
+    const { data: dbUser } = await supabaseAdmin
       .from('users')
       .select('id')
       .eq('id', numericUserId)
       .maybeSingle()
 
-    if (userErr || !dbUser) {
-      console.error('[JOIN ERROR] User not found in DB:', numericUserId)
+    if (!dbUser) {
       return NextResponse.json({ error: 'User does not exist in DB' }, { status: 400 })
     }
 
-    // 2. Получаем стол
-    const { data: currentTable, error: fetchError } = await supabase
+    // 2. Стол
+    const { data: currentTable, error: fetchError } = await supabaseAdmin
       .from('tables')
       .select('*')
       .eq('id', tableId)
@@ -38,8 +41,13 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Table not found' }, { status: 404 })
     }
 
-    // 3. Проверяем, сидит ли уже игрок
-    const { data: existingPlayer } = await supabase
+    // 3. Нельзя подсесть к идущей или завершённой игре
+    if (currentTable.status !== 'waiting') {
+      return NextResponse.json({ error: 'Игра уже началась' }, { status: 403 })
+    }
+
+    // 4. Уже сидит?
+    const { data: existingPlayer } = await supabaseAdmin
       .from('table_players')
       .select('*')
       .eq('table_id', tableId)
@@ -47,34 +55,37 @@ export async function POST(request) {
       .maybeSingle()
 
     if (existingPlayer) {
-      console.log('[JOIN INFO] User already seated:', numericUserId)
-      return NextResponse.json({ table: currentTable })
+      return NextResponse.json({ table: currentTable, alreadySeated: true })
     }
 
-    // 4. Находим свободное место
-    const { data: existingPlayers } = await supabase
+    // 5. Свободные места
+    const { data: existingPlayers } = await supabaseAdmin
       .from('table_players')
       .select('seat_number')
       .eq('table_id', tableId)
 
     const takenSeats = (existingPlayers || []).map((p) => p.seat_number)
     let seatNumber = 1
-    while (takenSeats.includes(seatNumber) && seatNumber <= currentTable.max_players) {
+    const maxPlayers = Number(currentTable.max_players) || 4
+    while (takenSeats.includes(seatNumber) && seatNumber <= maxPlayers) {
       seatNumber++
     }
 
-    // 5. РАЗГРАНИЧЕНИЕ ЛОГИКИ КОМАНД СИНДИКАТА (Пары рядом: 1-2 = Команда 1, 3-4 = Команда 2, 5-6 = Команда 3)
-    let team = 1
+    if (seatNumber > maxPlayers) {
+      return NextResponse.json({ error: 'Стол заполнен' }, { status: 400 })
+    }
+
+    // 6. Команды Синдиката: места 1-2 = команда 1, 3-4 = команда 2, 5-6 = команда 3.
+    //    В классике «команда» = номер места (индивидуальная игра).
+    let team = seatNumber
     if (currentTable.mode === 'Синдикат') {
       if (seatNumber <= 2) team = 1
       else if (seatNumber <= 4) team = 2
       else team = 3
-    } else {
-      team = seatNumber
     }
 
-    // 6. Вставляем в table_players
-    const { data: insertedPlayer, error: insertError } = await supabase
+    // 7. Сажаем игрока
+    const { data: insertedPlayer, error: insertError } = await supabaseAdmin
       .from('table_players')
       .insert({
         table_id: tableId,
@@ -86,25 +97,22 @@ export async function POST(request) {
       .single()
 
     if (insertError) {
-      console.error('[JOIN INSERT ERROR TO TABLE_PLAYERS]:', insertError)
+      console.error('[JOIN INSERT ERROR]:', insertError)
       return NextResponse.json({ error: insertError.message }, { status: 500 })
     }
 
-    console.log('[JOIN SUCCESS] Player seated:', insertedPlayer)
-
-    // 7. Обновляем счётчик в tables
-    const newCount = takenSeats.length + 1
-    const { data: updatedTable } = await supabase
+    // 8. Обновляем счётчик. Статус остаётся 'waiting' — игру начинает создатель.
+    const newCount = (existingPlayers || []).length + 1
+    const { data: updatedTable, error: updateError } = await supabaseAdmin
       .from('tables')
-      .update({
-        current_players: newCount,
-        status: newCount >= currentTable.max_players ? 'playing' : 'waiting',
-      })
+      .update({ current_players: newCount })
       .eq('id', tableId)
       .select()
       .single()
 
-    return NextResponse.json({ table: updatedTable })
+    if (updateError) throw updateError
+
+    return NextResponse.json({ table: updatedTable, player: insertedPlayer })
   } catch (err) {
     console.error('[JOIN CRITICAL ERROR]:', err.message)
     return NextResponse.json({ error: err.message }, { status: 500 })

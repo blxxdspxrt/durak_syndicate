@@ -12,6 +12,7 @@ import { TableLobby } from '@/components/table-lobby'
 import { GameScreen } from '@/components/screens/game-screen'
 import { Stats, Tab, Table, UserData } from '@/types'
 import { supabase } from '@/lib/supabase'
+import { getInitData } from '@/lib/telegram-client'
 
 const defaultAvatarColors = [
   'from-sky-400 to-blue-700',
@@ -74,21 +75,22 @@ export default function SyndicateApp() {
     }
   }
 
-  // 👇 ФУНКЦИЯ ПОДГРУЗКИ СОСТОЯНИЯ ИГРЫ
+  // 👇 ПОДГРУЗКА СОСТОЯНИЯ ИГРЫ.
+  // Клиент НЕ читает game_states напрямую: сервер отдаёт только свои карты,
+  // у чужих — лишь количество, а колода приходит как deck_count.
   const fetchGameState = async (tableId: string) => {
     try {
-      const { data, error } = await supabase
-        .from('game_states')
-        .select('*')
-        .eq('table_id', tableId)
-        .maybeSingle()
-
-      if (data) setGameState(data)
+      const params = new URLSearchParams({
+        userId: String(user.id),
+        initData: getInitData(),
+      })
+      const res = await fetch(`/api/games/state/${tableId}?${params.toString()}`, { cache: 'no-store' })
+      const data = await res.json()
+      if (data.gameState) setGameState(data.gameState)
     } catch (err) {
       console.error('Fetch Game State Error:', err)
     }
   }
-
   useEffect(() => {
     if (typeof window === 'undefined') return
     const tg = (window as any).Telegram?.WebApp
@@ -217,24 +219,19 @@ export default function SyndicateApp() {
       )
       .subscribe()
 
-    // 3. Слушаем изменения игрового состояния (карты, ходы)
-    const gameChannel = supabase
-      .channel(`game_state_${lobby.id}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'game_states', filter: `table_id=eq.${lobby.id}` },
-        (payload) => {
-          if (payload.new) setGameState(payload.new)
-        }
-      )
-      .subscribe()
+    // Игровое состояние читаем ТОЛЬКО через защищённый API и опрашиваем
+    // с интервалом. Realtime для game_states намеренно отключён —
+    // таблица закрыта для anon, чтобы никто не подсматривал чужие карты.
+    const poll = window.setInterval(() => {
+      fetchGameState(lobby.id)
+    }, 1500)
 
     return () => {
+      window.clearInterval(poll)
       supabase.removeChannel(tableChannel)
       supabase.removeChannel(lobbyChannel)
-      supabase.removeChannel(gameChannel)
     }
-  }, [lobby?.id])
+  }, [lobby?.id, user.id])
 
   const handleCreateTable = async (filters: { bet: number; players: number; mode: string; deck: string; turnTime: number }) => {
     try {
@@ -251,6 +248,7 @@ export default function SyndicateApp() {
           mode: modeToCreate,
           deck: filters.deck,
           turnTime: filters.turnTime,
+          initData: getInitData(),
         }),
       })
       const data = await res.json()
@@ -272,7 +270,7 @@ export default function SyndicateApp() {
       await fetch('/api/tables/leave', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tableId: lobby.id, userId: user.id, isCreator: lobby.creator_id === user.id }),
+        body: JSON.stringify({ tableId: lobby.id, userId: user.id, initData: getInitData() }),
       })
       setToast('Вы вышли из-за стола')
     } catch (err) {
@@ -286,24 +284,30 @@ export default function SyndicateApp() {
 
   const handleJoinTable = async (table: Table) => {
     try {
-      if (table.creator_id !== user.id && table.current_players < table.max_players) {
+      let current = table
+      if (current.creator_id !== user.id) {
         const res = await fetch('/api/tables/join', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ tableId: table.id, userId: user.id }),
+          body: JSON.stringify({ tableId: current.id, userId: user.id, initData: getInitData() }),
         })
         const data = await res.json()
-        if (data.table) table = data.table
+        if (!res.ok) {
+          setToast(data.error || 'Не удалось войти за стол')
+          fetchTables()
+          return
+        }
+        if (data.table) current = data.table
       }
 
-      setLobby(table)
-      setToast(`Вошли за стол ${table.bet} $`)
-      await fetchLobbyPlayers(table.id)
+      setLobby(current)
+      setToast(`Вошли за стол ${current.bet} $`)
+      await fetchLobbyPlayers(current.id)
       fetchTables()
     } catch (err) {
       console.error('Join Table Error:', err)
-      setLobby(table)
-      fetchLobbyPlayers(table.id)
+      setToast('Ошибка подключения к столу')
+      fetchTables()
     }
   }
 
@@ -325,12 +329,13 @@ export default function SyndicateApp() {
 
         {/* 👇 LOBBY → GAME_SCREEN → LOBBY (по статусу стола) */}
         {lobby ? (
-          lobby.status === 'in_game' ? (
+          ['playing', 'in_game', 'finished'].includes(lobby.status) ? (
             <GameScreen
               user={user}
               gameState={gameState}
               players={lobbyPlayers}
               onLeave={handleLeaveTable}
+              onRefresh={() => fetchGameState(lobby.id)}
             />
           ) : (
             <TableLobby

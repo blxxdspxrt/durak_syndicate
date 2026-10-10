@@ -1,35 +1,88 @@
 import { NextResponse } from 'next/server'
-import { supabase } from '@/lib/supabase'
+import { supabaseAdmin } from '@/lib/supabase-admin'
+import { initGameState, MODE_SYNDICATE, MODE_CLASSIC, MODE_TRANSFER } from '@/lib/game-engine'
+import { authenticateRequest } from '@/lib/telegram-auth'
 
-const SUITS = ['s', 'h', 'd', 'c']
-const RANKS = ['6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A']
+// ============================================================================
+// POST /api/games/start — старт игры (только создатель стола).
+// ============================================================================
+// Сервер перемешивает колоду, раздаёт карты и выбирает первого игрока —
+// клиент не участвует в раздаче и не может её подделать.
+// ============================================================================
 
-function createDeck() {
-  const deck = []
-  for (const suit of SUITS) {
-    for (const rank of RANKS) {
-      deck.push({ id: `${rank}${suit}`, rank, suit })
-    }
+const BASE_COLUMNS = ['table_id', 'deck', 'trump_card', 'attacker_id', 'defender_id', 'table_cards', 'hands', 'status', 'updated_at']
+
+const PERSIST_FIELDS = [
+  'table_id',
+  'mode',
+  'teams',
+  'deck',
+  'trump_card',
+  'trump_suit',
+  'hands',
+  'table_cards',
+  'discard',
+  'attacker_id',
+  'defender_id',
+  'turn_order',
+  'phase',
+  'status',
+  'turn_deadline',
+  'winner_id',
+  'loser_id',
+  'winner_ids',
+  'loser_ids',
+  'updated_at',
+  'first_player_id',
+  'roulette_started_at',
+]
+
+function migrationHint(err) {
+  const msg = err?.message || ''
+  if (/column .* does not exist/i.test(msg) || err?.code === 'PGRST204' || err?.code === '42703') {
+    return 'Схема БД устарела. Примените supabase/migrations/001_game_states.sql, 002_security.sql и 003_game_state_modes.sql в Supabase → SQL Editor.'
   }
-  for (let i = deck.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1))
-    ;[deck[i], deck[j]] = [deck[j], deck[i]]
-  }
-  return deck
+  return msg
 }
 
 export async function POST(request) {
   try {
-    const { tableId, userId } = await request.json()
+    const body = await request.json()
+    const { tableId, userId, initData } = body
 
     if (!tableId) {
       return NextResponse.json({ error: 'tableId is required' }, { status: 400 })
     }
 
-    // 1. Достаем всех игроков за столом
-    const { data: players, error: playersErr } = await supabase
+    const auth = authenticateRequest(initData, userId)
+    if (auth.error) {
+      return NextResponse.json({ error: auth.error }, { status: 401 })
+    }
+
+    // 1. Стол
+    const { data: table, error: tableErr } = await supabaseAdmin
+      .from('tables')
+      .select('*')
+      .eq('id', tableId)
+      .maybeSingle()
+
+    if (tableErr || !table) {
+      return NextResponse.json({ error: 'Стол не найден' }, { status: 404 })
+    }
+
+    // 2. Только создатель может начать игру
+    if (Number(table.creator_id) !== auth.userId) {
+      return NextResponse.json({ error: 'Начать игру может только создатель стола' }, { status: 403 })
+    }
+
+    if (table.status === 'playing') {
+      return NextResponse.json({ error: 'Игра уже началась' }, { status: 400 })
+    }
+
+    // 3. Игроки за столом (по порядку мест)
+    const { data: players, error: playersErr } = await supabaseAdmin
       .from('table_players')
-      .select('user_id, seat_number')
+      .select('user_id, seat_number, team')
       .eq('table_id', tableId)
       .order('seat_number', { ascending: true })
 
@@ -37,50 +90,71 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Нужно минимум 2 игрока для старта' }, { status: 400 })
     }
 
-    // 2. Генерируем колоду и раздаем по 6 карт
-    let deck = createDeck()
-    const hands = {}
-
-    for (const p of players) {
-      hands[p.user_id] = deck.splice(0, 6)
+    const mode = table.mode || MODE_TRANSFER
+    if (mode === MODE_SYNDICATE && (players.length < 4 || players.length % 2 !== 0)) {
+      return NextResponse.json(
+        { error: 'Для Синдиката нужно чётное число игроков (4 или 6)' },
+        { status: 400 }
+      )
     }
 
-    const trumpCard = deck[deck.length - 1]
-    const attackerId = players[0].user_id
-    const defenderId = players[1].user_id
+    // 4. Рулетка: сервер выбирает первого игрока случайно
+    const firstPlayer = players[Math.floor(Math.random() * players.length)]
+    const rouletteStartedAt = new Date().toISOString()
 
-    // 3. Создаем или обновляем состояние игры
-    const { error: gameErr } = await supabase.from('game_states').upsert({
-      table_id: tableId,
-      deck,
-      trump_card: trumpCard,
-      attacker_id: attackerId,
-      defender_id: defenderId,
-      table_cards: [],
-      hands,
-      status: 'playing',
-      updated_at: new Date().toISOString(),
+    // 5. Инициализируем состояние (команды только для Синдиката)
+    const state = initGameState({
+      tableId,
+      players: players.map((p) => p.user_id),
+      deckType: table.deck || '36 карт',
+      firstPlayerId: firstPlayer.user_id,
+      mode,
+      teams: mode === MODE_SYNDICATE ? players.map((p) => p.team) : [],
     })
 
-    if (gameErr) {
-      console.error('[GAME START UPSERT ERROR]', gameErr)
-      return NextResponse.json({ error: gameErr.message }, { status: 500 })
+    const payload = {}
+    for (const field of PERSIST_FIELDS) {
+      if (field === 'first_player_id') payload[field] = firstPlayer.user_id
+      else if (field === 'roulette_started_at') payload[field] = rouletteStartedAt
+      else payload[field] = state[field]
     }
 
-    // 4. Обновляем статус стола
-    const { data: updatedTable, error: tableErr } = await supabase
+    let upsertPayload = payload
+
+    let { error: gameErr } = await supabaseAdmin
+      .from('game_states')
+      .upsert(upsertPayload, { onConflict: 'table_id' })
+
+    // Откат на базовые колонки, если миграции ещё не применены
+    if (gameErr) {
+      const minimal = {}
+      for (const field of BASE_COLUMNS) minimal[field] = payload[field]
+      const retry = await supabaseAdmin
+        .from('game_states')
+        .upsert(minimal, { onConflict: 'table_id' })
+      if (retry.error) {
+        return NextResponse.json({ error: migrationHint(gameErr) }, { status: 500 })
+      }
+    }
+
+    // 6. Обновляем статус стола (единый статус «playing»)
+    const { data: updatedTable, error: updErr } = await supabaseAdmin
       .from('tables')
-      .update({ status: 'in_game' })
+      .update({ status: 'playing' })
       .eq('id', tableId)
       .select()
       .single()
 
-    if (tableErr) {
-      console.error('[TABLE UPDATE ERROR]', tableErr)
-      return NextResponse.json({ error: tableErr.message }, { status: 500 })
+    if (updErr) {
+      return NextResponse.json({ error: migrationHint(updErr) }, { status: 500 })
     }
 
-    return NextResponse.json({ success: true, table: updatedTable })
+    return NextResponse.json({
+      success: true,
+      table: updatedTable,
+      firstPlayerId: firstPlayer.user_id,
+      rouletteStartedAt,
+    })
   } catch (err) {
     console.error('[GAME START CRITICAL ERROR]', err)
     return NextResponse.json({ error: err.message }, { status: 500 })

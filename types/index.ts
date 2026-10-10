@@ -21,7 +21,7 @@ export type Table = {
   mode: string
   deck: string
   turn_time: number
-  status: 'waiting' | 'playing' | 'finished'
+  status: 'waiting' | 'playing' | 'in_game' | 'finished'
 }
 
 export type Stats = {
@@ -32,3 +32,40 @@ export type Stats = {
 }
 
 export type Tab = 'play' | 'top' | 'shop' | 'profile'
+
+export type Card = {
+  id: string
+  rank: string
+  suit: 's' | 'h' | 'd' | 'c'
+}
+
+export type TablePair = {
+  attack: Card
+  defend: Card | null
+}
+
+export type GameState = {
+  table_id: string
+  mode?: string
+  teams?: (number | null)[]
+  // Клиент больше не получает порядок колоды — только её размер
+  deck?: Card[]
+  deck_count?: number
+  trump_card: Card | null
+  trump_suit: string | null
+  hands: Record<string, Card[] | { count: number }>
+  table_cards: TablePair[]
+  discard: Card[]
+  attacker_id: number
+  defender_id: number
+  turn_order: number[]
+  phase: 'attack' | 'defend'
+  status: 'playing' | 'finished'
+  turn_deadline: string | null
+  winner_id: number | null
+  loser_id: number | null
+  winner_ids?: number[]
+  loser_ids?: number[]
+  first_player_id?: number
+  roulette_started_at?: string
+}

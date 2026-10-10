@@ -1,8 +1,9 @@
 import { useState, useMemo } from 'react'
-import { Check, Dices, DoorOpen, Play, Spade, Shield } from 'lucide-react'
+import { Dices, DoorOpen, Play, Spade, Shield } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Table, UserData } from '@/types'
 import { DynamicAvatar } from './dynamic-avatar'
+import { getInitData } from '@/lib/telegram-client'
 
 const placeholderColors = [
   'from-sky-400 to-blue-700',
@@ -54,8 +55,6 @@ export function TableLobby({
   isCreator?: boolean
   onStartGame?: (updatedTable: Table) => void
 }) {
-  const [spinning, setSpinning] = useState(false)
-  const [winner, setWinner] = useState('')
   const [gameStarting, setGameStarting] = useState(false)
 
   const totalSlots = table.max_players
@@ -148,31 +147,6 @@ export function TableLobby({
   const minPlayers = isSyndicate ? 4 : 2
   const canStart = isCreator && actualFilled >= minPlayers
 
-  // Секторы для рулетки
-  const rouletteItems = useMemo(() => {
-    if (!isSyndicate) return slots.filter((s) => !s.isEmpty)
-
-    // В Синдикате крутим по именам Синдикатов
-    const activeTeams = new Set(slots.filter((s) => !s.isEmpty).map((s) => s.team))
-    return Array.from(activeTeams).map((tNum) => ({
-      name: SYNDICATE_NAMES[tNum - 1] || `Синдикат ${tNum}`,
-      initials: `С${tNum}`,
-      color: placeholderColors[(tNum - 1) % placeholderColors.length],
-      photoUrl: undefined,
-    }))
-  }, [slots, isSyndicate])
-
-  const spin = () => {
-    if (rouletteItems.length === 0) return
-    setSpinning(true)
-    setWinner('')
-    window.setTimeout(() => {
-      setSpinning(false)
-      const w = rouletteItems[Math.floor(Math.random() * rouletteItems.length)]
-      setWinner(w.name)
-    }, 2200)
-  }
-
   // 👇 ЗАПРОС К БЭКЕНДУ + МГНОВЕННОЕ ОБНОВЛЕНИЕ ЛОББИ
   const startGame = async () => {
     try {
@@ -183,6 +157,7 @@ export function TableLobby({
         body: JSON.stringify({
           tableId: table.id,
           userId: user.id,
+          initData: getInitData(),
         }),
       })
 
@@ -245,17 +220,25 @@ export function TableLobby({
         <span className="table-status ml-auto">{table.status === 'waiting' ? 'НАБОР ИГРОКОВ' : 'СКОРО ИГРА'}</span>
       </div>
 
-      {/* Рулетка первенства */}
+      {/* Инфо-панель: рулетка запустится автоматически при старте игры */}
       <div className="lobby-card">
-        <div className="mb-6 text-center">
+        <div className="mb-4 text-center">
           <p className="eyebrow text-slate-500">FIRST MOVE ROULETTE</p>
           <h3 className="mt-2 text-lg font-semibold text-white">
             {isSyndicate ? 'Какой Синдикат ходит первым?' : 'Кто ходит первым?'}
           </h3>
         </div>
-        <div className={`roulette ${spinning ? 'spinning' : ''}`}>
+        <div className="roulette">
           <div className="roulette-ring">
-            {rouletteItems.map((p, i) => (
+            {(isSyndicate
+              ? Array.from(new Set(slots.filter((s) => !s.isEmpty).map((s) => s.team))).map((tNum) => ({
+                  name: SYNDICATE_NAMES[tNum - 1] || `Синдикат ${tNum}`,
+                  initials: `С${tNum}`,
+                  color: placeholderColors[(tNum - 1) % placeholderColors.length],
+                  photoUrl: undefined,
+                }))
+              : slots.filter((s) => !s.isEmpty)
+            ).map((p, i) => (
               <div className="roulette-slot" key={i}>
                 <DynamicAvatar initials={p.initials} color={p.color} photoUrl={p.photoUrl} size="sm" />
                 <span>{p.name.replace(' (Создатель)', '').replace(' (Вы)', '')}</span>
@@ -263,14 +246,10 @@ export function TableLobby({
             ))}
           </div>
         </div>
-        {winner && (
-          <div className="mt-6 rounded-lg border border-emerald-400/20 bg-emerald-400/[0.07] px-4 py-3 text-center text-sm text-emerald-300">
-            <Check className="mr-2 inline size-4" /> Первый ход: <strong>{winner}</strong>
-          </div>
-        )}
-        <Button disabled={spinning || rouletteItems.length === 0} onClick={spin} className="mt-6 h-11 w-full bg-blue-500 text-white hover:bg-blue-400">
-          {spinning ? 'Определяем...' : 'Крутить рулетку'} <Dices data-icon="inline-end" />
-        </Button>
+        <div className="mt-5 flex items-center justify-center gap-2 rounded-lg border border-blue-400/20 bg-blue-400/[0.06] px-4 py-3 text-center text-xs text-blue-300">
+          <Dices className="size-4" />
+          Рулетка запустится автоматически, когда создатель начнёт игру
+        </div>
       </div>
 
       {/* Отрисовка слотов */}

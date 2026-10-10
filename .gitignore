@@ -14,4 +14,9 @@ node_modules
 .next/
 .DS_Store
 
+# Временные/служебные файлы
+.tmp-backup/
+.tmp-*
+tsconfig.tsbuildinfo
+
 .vs/
