@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { Shield, Swords, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { plural, PLAYERS, SYNDICATES } from '@/lib/plural'
 
 // Варианты времени на ход (синхронизированы с TURN_OPTIONS в lib/game-engine.js)
 const TURN_OPTIONS = [15, 30, 45, 60]
@@ -45,7 +46,7 @@ export function FiltersModal({
         {/* Команда / Игроки */}
         <div className="space-y-1.5">
           <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-            {isSyndicate ? 'Состав (Только парами 2х2 или 3х2)' : 'Количество игроков'}
+            {isSyndicate ? 'Состав (только парами: 2×2 или 2×2×2)' : 'Количество игроков'}
           </label>
           <div className="grid grid-cols-2 gap-2">
             {allowedPlayerCounts.map((count) => (
@@ -61,7 +62,9 @@ export function FiltersModal({
                     : 'border-white/10 bg-slate-950/60 text-slate-400 hover:border-white/20'
                 }`}
               >
-                {isSyndicate ? `${count} Игрока (${count / 2} Синдиката)` : `${count} Игрока`}
+                {isSyndicate
+                  ? `${count} ${plural(count, PLAYERS)} (${count / 2} ${plural(count / 2, SYNDICATES)})`
+                  : `${count} ${plural(count, PLAYERS)}`}
               </button>
             ))}
           </div>

@@ -29,12 +29,12 @@ export async function POST(request) {
       return NextResponse.json({ error: auth.error }, { status: 401 })
     }
     const numericUserId = auth.userId
-
-    // Бан за нарушения (выходы/AFK): поиск/создание/посадка недоступны
-    const ban = await checkBan(numericUserId)
-    if (ban) return NextResponse.json({ error: ban.error }, { status: 403 })
-
     const gameMode = mode || 'Переводной'
+
+    // Бан за нарушения: у каждого режима СВОЙ (провинился в Синдикате —
+    // Классика остаётся доступной, и наоборот)
+    const ban = await checkBan(numericUserId, gameMode)
+    if (ban) return NextResponse.json({ error: ban.error }, { status: 403 })
     const players = Number(maxPlayers) || 4
 
     // Валидация состава

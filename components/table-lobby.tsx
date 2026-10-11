@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Table, UserData } from '@/types'
 import { DynamicAvatar } from './dynamic-avatar'
 import { getInitData } from '@/lib/telegram-client'
+import { plural, PLAYERS, SEATS } from '@/lib/plural'
 
 const placeholderColors = [
   'from-sky-400 to-blue-700',
@@ -208,7 +209,9 @@ export function TableLobby({
           <p className="eyebrow text-blue-400">TABLE #{tableId}</p>
           <h2 className="section-title mt-1">Ожидание игроков</h2>
         </div>
-        <span className="table-status">{actualFilled}/{totalSlots} МЕСТ</span>
+        <span className="table-status">
+          {actualFilled}/{totalSlots} {plural(totalSlots, SEATS).toUpperCase()}
+        </span>
       </div>
 
       <div className="mb-4 flex flex-wrap gap-2">
@@ -327,7 +330,7 @@ export function TableLobby({
             : isCreator
             ? canStart
               ? 'Начать игру'
-              : `Нужно еще ${needMore} игрок${needMore === 1 ? 'а' : 'ов'}`
+              : `Нужно ещё ${needMore} ${plural(needMore, PLAYERS)}`
             : 'Ожидание создателя'}
         </Button>
       </div>

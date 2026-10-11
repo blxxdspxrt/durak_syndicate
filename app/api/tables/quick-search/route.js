@@ -15,7 +15,7 @@ export async function POST(request) {
       return NextResponse.json({ error: auth.error }, { status: 401 })
     }
 
-    const ban = await checkBan(auth.userId)
+    const ban = await checkBan(auth.userId, mode)
     if (ban) return NextResponse.json({ error: ban.error }, { status: 403 })
 
     const { tables } = await sweepAndLoadLobby()

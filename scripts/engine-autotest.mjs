@@ -26,7 +26,7 @@ async function loadModule(relPath) {
 
 const engine = await loadModule('lib/game-engine.js')
 const economy = await loadModule('lib/economy.js')
-const { applyMove, applyTimeout, shouldAutoBito, canContinueBout, abortGame, placementOrder, reconcileTimeout } = engine
+const { applyMove, applyTimeout, shouldAutoBito, canContinueBout, abortGame, placementOrder, reconcileTimeout, forceAfk } = engine
 const { computeSettlement, leaveSanction } = economy
 
 // ---------------------------------------------------------------------------
@@ -577,6 +577,35 @@ console.log('\n7. Серверная проверка просрочки, сан
 
   const syn3 = leaveSanction({ mode: 'Синдикат', playerCount: 6, syndicateCount: 3, warned: true, streak: 3 })
   check('Синдикат 2×2×2, 3-й лив: -45 × 1.15 = -52', syn3.influence === -52, String(syn3.influence))
+}
+
+// ---------------------------------------------------------------------------
+// 8. Регрессии: явный выход (forceAfk) и ELO в 1v1
+// ---------------------------------------------------------------------------
+console.log('\n8. Регрессии: явный выход и ELO в дуэли')
+
+{
+  // Явный выход в 1v1 → партия завершается, оставшийся победил
+  const s = baseState({
+    hands: { '1': [card('9s')], '2': [card('7s')] },
+    table_cards: [],
+  })
+  const { state: after } = forceAfk(s, 2)
+  check('forceAfk: партия завершена', after?.status === 'finished')
+  check('forceAfk: 1-е место — игрок 1', Number(after?.placement?.[0]?.[0]) === 1)
+  check('forceAfk: выбывший — последний', Number(after?.placement?.[1]?.[0]) === 2)
+
+  // Экономика: победителю ЭЛО добавляется, а не 0 (был баг)
+  const { results } = computeSettlement(after, 1000)
+  const winner = results.find((r) => r.userId === 1)
+  const loser = results.find((r) => r.userId === 2)
+
+  check('1v1: победитель забирает 100% чистого фонда (1840)', winner.prize === 1840, String(winner.prize))
+  check('1v1: победителю +20 ELO', winner.elo === 20, String(winner.elo))
+  check('1v1: победитель чистыми +840', winner.dollars === 840, String(winner.dollars))
+  check('1v1: выбывший теряет бай-ин', loser.dollars === -1000)
+  check('1v1: штраф выбывшему считает settleGame (здесь 0)', loser.elo === 0)
+  check('1v1: zero-sum ровно -рейк (-160)', results.reduce((a, r) => a + r.dollars, 0) === -160)
 }
 
 // ---------------------------------------------------------------------------

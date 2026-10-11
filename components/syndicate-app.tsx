@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Check, Shield, ShoppingBag, Swords, UserRound } from 'lucide-react'
 import { FiltersModal } from '@/components/filters-modal'
 import { Header } from '@/components/header'
@@ -35,6 +35,11 @@ export default function SyndicateApp() {
   // 👇 НОВЫЙ СТЕЙТ ДЛЯ СОСТОЯНИЯ ИГРЫ
   const [gameState, setGameState] = useState<any>(null)
 
+  // Активный стол храним ещё и в ref: без этого «догоняющий» ответ сети
+  // (fetchLobbyPlayers/fetchGameState) воскрешал лобби уже ПОСЛЕ выхода,
+  // и экран моргал между столом и меню.
+  const activeTableRef = useRef<string | null>(null)
+
   const [tables, setTables] = useState<Table[]>([])
   const [stats, setStats] = useState<Stats>({
     onlinePlayers: 1,
@@ -68,6 +73,8 @@ export default function SyndicateApp() {
     try {
       const res = await fetch(`/api/tables/${tableId}`)
       const data = await res.json()
+      // Если мы уже вышли из-за стола — ответ игнорируем (иначе лобби «воскреснет»)
+      if (activeTableRef.current !== tableId) return
       if (data.players && Array.isArray(data.players)) setLobbyPlayers(data.players)
       if (data.table) setLobby(data.table)
     } catch (err) {
@@ -88,19 +95,34 @@ export default function SyndicateApp() {
 
       // Нас больше нет за этим столом (кик за AFK или стол закрыт) — в лобби.
       if (res.status === 403 || res.status === 404) {
-        setLobby(null)
-        setLobbyPlayers([])
-        setGameState(null)
+        exitTable()
         setToast('Вы больше не за этим столом')
         return
       }
 
       const data = await res.json()
+      // Пока шёл запрос, мы могли выйти — тогда ответ не применяем
+      if (activeTableRef.current !== tableId) return
       if (data.gameState) setGameState(data.gameState)
     } catch (err) {
       console.error('Fetch Game State Error:', err)
     }
   }
+
+  // Вход за стол / выход из него: синхронно держим ref в актуальном состоянии,
+  // чтобы «догоняющие» ответы сети не воскрешали лобби после выхода.
+  const enterTable = (table: Table | null) => {
+    activeTableRef.current = table?.id ?? null
+    setLobby(table)
+  }
+
+  const exitTable = () => {
+    activeTableRef.current = null
+    setLobby(null)
+    setLobbyPlayers([])
+    setGameState(null)
+  }
+
   useEffect(() => {
     if (typeof window === 'undefined') return
     const tg = (window as any).Telegram?.WebApp
@@ -269,9 +291,7 @@ export default function SyndicateApp() {
         if (data.stats) setStats(data.stats)
         if (Array.isArray(data.tables)) setTables(data.tables)
         if (data.removed && lobby?.id) {
-          setLobby(null)
-          setLobbyPlayers([])
-          setGameState(null)
+          exitTable()
           setToast('Стол закрыт: игроки вышли')
         }
       } catch {
@@ -308,7 +328,7 @@ export default function SyndicateApp() {
       const data = await res.json()
 
       if (data.table) {
-        setLobby(data.table)
+        enterTable(data.table)
         setToast(`Стол на ${data.table.bet} $ создан!`)
         await fetchLobbyPlayers(data.table.id)
         fetchTables()
@@ -320,6 +340,9 @@ export default function SyndicateApp() {
 
   const handleLeaveTable = async () => {
     if (!lobby) return
+    // Сразу помечаем «мы больше не за столом»: иначе ответы сети, начатые до
+    // выхода, вернут лобби, и экран будет моргать между столом и меню.
+    activeTableRef.current = null
     try {
       await fetch('/api/tables/leave', {
         method: 'POST',
@@ -330,9 +353,7 @@ export default function SyndicateApp() {
     } catch (err) {
       console.error('Leave Table Error:', err)
     }
-    setLobby(null)
-    setLobbyPlayers([])
-    setGameState(null)
+    exitTable()
     fetchTables()
   }
 
@@ -354,7 +375,7 @@ export default function SyndicateApp() {
         if (data.table) current = data.table
       }
 
-      setLobby(current)
+      enterTable(current)
       setToast(`Вошли за стол ${current.bet} $`)
       await fetchLobbyPlayers(current.id)
       fetchTables()
@@ -399,7 +420,7 @@ export default function SyndicateApp() {
               onBack={handleLeaveTable}
               isCreator={lobby.creator_id === user.id}
               onStartGame={(updatedTable) => {
-                setLobby(updatedTable)
+                enterTable(updatedTable)
                 fetchGameState(updatedTable.id)
               }}
             />
@@ -422,13 +443,17 @@ export default function SyndicateApp() {
           <TopScreen currentUser={user} />
         )}
 
-        {/* НОВАЯ ПАНЕЛЬ НАВИГАЦИИ С СДВОЕННЫМ ТУМБЛЕРОМ ПОЦЕНТРУ */}
-        <nav className="bottom-nav flex items-center justify-between px-4 py-2.5 bg-slate-950/95 border-t border-white/10 backdrop-blur-xl">
+        {/* НИЖНЯЯ ПАНЕЛЬ НАВИГАЦИИ.
+            Скрыта, пока вы за столом (лобби ИЛИ игра): иначе тапы по вкладкам
+            конфликтовали с экраном стола и вызывали «моргание».
+            Нужно вернуть её в лобби — условие: !lobby || lobby.status === 'waiting'. */}
+        {!lobby && (
+          <nav className="bottom-nav flex items-center justify-between px-4 py-2.5 bg-slate-950/95 border-t border-white/10 backdrop-blur-xl">
           {/* Кнопка Магазин Слева */}
           <button
             onClick={() => {
               setTab('shop')
-              setLobby(null)
+              exitTable()
             }}
             className={`flex flex-col items-center gap-1 transition-all ${
               tab === 'shop' ? 'text-blue-400 font-semibold scale-105' : 'text-slate-400 hover:text-white'
@@ -454,7 +479,7 @@ export default function SyndicateApp() {
             <button
               onClick={() => {
                 setTab('classic')
-                setLobby(null)
+                exitTable()
               }}
               className={`relative z-10 flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl transition-colors ${
                 tab === 'classic' ? 'text-white' : 'text-slate-400 hover:text-slate-200'
@@ -467,7 +492,7 @@ export default function SyndicateApp() {
             <button
               onClick={() => {
                 setTab('syndicate')
-                setLobby(null)
+                exitTable()
               }}
               className={`relative z-10 flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl transition-colors ${
                 tab === 'syndicate' ? 'text-white' : 'text-slate-400 hover:text-slate-200'
@@ -482,7 +507,7 @@ export default function SyndicateApp() {
           <button
             onClick={() => {
               setTab('profile')
-              setLobby(null)
+              exitTable()
             }}
             className={`flex flex-col items-center gap-1 transition-all ${
               tab === 'profile' ? 'text-blue-400 font-semibold scale-105' : 'text-slate-400 hover:text-white'
@@ -491,7 +516,8 @@ export default function SyndicateApp() {
             <UserRound className="size-5" />
             <span className="text-[10px] tracking-wide">Профиль</span>
           </button>
-        </nav>
+          </nav>
+        )}
       </div>
 
       {modal && (

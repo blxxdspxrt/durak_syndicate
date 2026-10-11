@@ -17,10 +17,6 @@ export async function POST(request) {
     }
     const numericUserId = auth.userId
 
-    // Бан за нарушения (выходы/AFK)
-    const ban = await checkBan(numericUserId)
-    if (ban) return NextResponse.json({ error: ban.error }, { status: 403 })
-
     if (!tableId) {
       return NextResponse.json({ error: 'tableId is required' }, { status: 400 })
     }
@@ -51,6 +47,10 @@ export async function POST(request) {
     if (currentTable.status !== 'waiting') {
       return NextResponse.json({ error: 'Игра уже началась' }, { status: 403 })
     }
+
+    // 3.0. Бан за нарушения — СВОЙ для каждого режима (см. lib/penalties.js)
+    const ban = await checkBan(numericUserId, currentTable.mode)
+    if (ban) return NextResponse.json({ error: ban.error }, { status: 403 })
 
     // 3.1. Бай-ин должен быть обеспечен балансом
     const bet = Number(currentTable.bet) || 0
