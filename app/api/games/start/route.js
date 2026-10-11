@@ -39,6 +39,10 @@ const PERSIST_FIELDS = [
   'placement',
   'even_split',
   'settled_at',
+  'turn_seconds',
+  'timeout_streak',
+  'afk_ids',
+  'folded_ids',
 ]
 
 function migrationHint(err) {
@@ -106,7 +110,8 @@ export async function POST(request) {
     const firstPlayer = players[Math.floor(Math.random() * players.length)]
     const rouletteStartedAt = new Date().toISOString()
 
-    // 5. Инициализируем состояние (команды только для Синдиката)
+    // 5. Инициализируем состояние (команды только для Синдиката).
+    //    Время хода берём ИЗ КОНФИГА СТОЛА (tables.turn_time), а не из константы.
     const state = initGameState({
       tableId,
       players: players.map((p) => p.user_id),
@@ -114,6 +119,7 @@ export async function POST(request) {
       firstPlayerId: firstPlayer.user_id,
       mode,
       teams: mode === MODE_SYNDICATE ? players.map((p) => p.team) : [],
+      turnTime: Number(table.turn_time) || undefined,
     })
 
     const payload = {}

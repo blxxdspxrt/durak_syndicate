@@ -85,6 +85,16 @@ export default function SyndicateApp() {
         initData: getInitData(),
       })
       const res = await fetch(`/api/games/state/${tableId}?${params.toString()}`, { cache: 'no-store' })
+
+      // Нас больше нет за этим столом (кик за AFK или стол закрыт) — в лобби.
+      if (res.status === 403 || res.status === 404) {
+        setLobby(null)
+        setLobbyPlayers([])
+        setGameState(null)
+        setToast('Вы больше не за этим столом')
+        return
+      }
+
       const data = await res.json()
       if (data.gameState) setGameState(data.gameState)
     } catch (err) {

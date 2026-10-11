@@ -97,16 +97,41 @@ export function GameScreen({
     return Math.max(0, Math.ceil(diff / 1000))
   }, [gameState?.turn_deadline, now])
 
-  // Авто-таймаут: если время вышло — просим сервер применить действие
+  // Авто-таймаут: если время вышло — просим сервер проверить время.
+  // 3 попытки с интервалом 1 с: в мобильных сетях пакеты теряются постоянно.
+  // Решение всё равно принимает сервер (reconcileTimeout), поэтому повторы
+  // безопасны, а обычный опрос состояния тоже застрахует партию от зависания.
   useEffect(() => {
     if (finished || secondsLeft === null || secondsLeft > 0) return
-    fetch('/api/games/timeout', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tableId: gameState.table_id, userId: user.id, initData: getInitData() }),
-    })
-      .then(() => onRefresh?.())
-      .catch(() => {})
+
+    let cancelled = false
+    let timer: number | undefined
+
+    const fire = async (attempt: number) => {
+      try {
+        const res = await fetch('/api/games/timeout', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            tableId: gameState.table_id,
+            userId: user.id,
+            initData: getInitData(),
+          }),
+        })
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        if (!cancelled) onRefresh?.()
+      } catch {
+        if (!cancelled && attempt < 3) {
+          timer = window.setTimeout(() => fire(attempt + 1), 1000)
+        }
+      }
+    }
+
+    fire(1)
+    return () => {
+      cancelled = true
+      if (timer) window.clearTimeout(timer)
+    }
   }, [secondsLeft, finished, gameState?.table_id])
 
   // Рулетка первенства: показываем один раз при старте

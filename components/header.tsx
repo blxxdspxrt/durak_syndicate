@@ -1,6 +1,7 @@
-import { Bell, Crown, Menu, Trophy, WalletCards } from 'lucide-react'
+import { Crown, Menu, Trophy, WalletCards } from 'lucide-react'
 import { UserData } from '@/types'
 import { DynamicAvatar } from './dynamic-avatar'
+import { NotificationsBell } from './notifications-bell'
 
 export function Header({ user, onMenu }: { user: UserData; onMenu: () => void }) {
   return (
@@ -30,7 +31,7 @@ export function Header({ user, onMenu }: { user: UserData; onMenu: () => void })
           </span>
           <span className="text-xs text-emerald-400/70">$</span>
         </div>
-        <button aria-label="Уведомления" className="icon-button"><Bell className="size-4" /></button>
+        <NotificationsBell userId={user.id} />
         <button aria-label="Меню" onClick={onMenu} className="icon-button sm:hidden"><Menu className="size-4" /></button>
       </div>
     </header>

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase-admin'
 import { authenticateRequest } from '@/lib/telegram-auth'
 import { sweepAndLoadLobby, evictUserFromOtherTables, seatPlayer } from '@/lib/presence'
+import { checkBan } from '@/lib/penalties'
 
 // GET: публичный список активных столов и АКТУАЛЬНОЙ статистики.
 // Секретных данных здесь нет — только метаданные лобби.
@@ -29,6 +30,10 @@ export async function POST(request) {
     }
     const numericUserId = auth.userId
 
+    // Бан за нарушения (выходы/AFK): поиск/создание/посадка недоступны
+    const ban = await checkBan(numericUserId)
+    if (ban) return NextResponse.json({ error: ban.error }, { status: 403 })
+
     const gameMode = mode || 'Переводной'
     const players = Number(maxPlayers) || 4
 
@@ -42,6 +47,10 @@ export async function POST(request) {
     }
 
     const betValue = Math.max(0, Math.floor(Number(bet) || 1000))
+
+    // Время хода — только из разрешённого набора (см. TURN_OPTIONS в движке)
+    const TURN_OPTIONS = [15, 30, 45, 60]
+    const turnTimeValue = TURN_OPTIONS.includes(Number(turnTime)) ? Number(turnTime) : 30
 
     // Бай-ин должен быть обеспечен балансом — иначе экономика станет убыточной.
     const { data: creatorWallet } = await supabaseAdmin
@@ -64,7 +73,7 @@ export async function POST(request) {
         current_players: 1,
         mode: gameMode,
         deck: deck || '36 карт',
-        turn_time: Number(turnTime) || 30,
+        turn_time: turnTimeValue,
         status: 'waiting',
       })
       .select()

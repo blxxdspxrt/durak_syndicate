@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase-admin'
 import { authenticateRequest } from '@/lib/telegram-auth'
 import { evictUserFromOtherTables, seatPlayer } from '@/lib/presence'
+import { checkBan } from '@/lib/penalties'
 
 // POST /api/tables/join — посадить игрока за стол.
 // userId берётся из подписанного Telegram initData, а не из тела запроса.
@@ -15,6 +16,10 @@ export async function POST(request) {
       return NextResponse.json({ error: auth.error }, { status: 401 })
     }
     const numericUserId = auth.userId
+
+    // Бан за нарушения (выходы/AFK)
+    const ban = await checkBan(numericUserId)
+    if (ban) return NextResponse.json({ error: ban.error }, { status: 403 })
 
     if (!tableId) {
       return NextResponse.json({ error: 'tableId is required' }, { status: 400 })

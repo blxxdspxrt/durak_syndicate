@@ -2,16 +2,18 @@ import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase-admin'
 import { authenticateRequest } from '@/lib/telegram-auth'
 import { refreshTableCount, reassignOwner } from '@/lib/presence'
-import { abortGame } from '@/lib/game-engine'
+import { forceAfk } from '@/lib/game-engine'
+import { persistGameState } from '@/lib/game-persist'
 import { settleGame } from '@/lib/game-settle'
 
 // POST /api/tables/leave — выйти из-за стола.
 // Флаг isCreator из тела НЕ используется — владелец определяется по creator_id в БД.
 //
 // Правила:
-//  • если выходит игрок, который ещё В ИГРЕ (у него есть карты) — партия
-//    досрочно завершается, а он признаётся проигравшим (приз поровну остальным);
-//  • если выходит уже победивший наблюдатель — партия продолжается;
+//  • явный выход во время партии ПРИРАВНЕН к AFK-вылету (2 просрочки): карты в
+//    отбой, бай-ин сгорает, штраф по лестнице санкций, остальные доигрывают
+//    (в 1v1 и 2×2 партия завершается сразу);
+//  • выход уже победившего наблюдателя партию не завершает;
 //  • владелец ушёл, а игроки остались — права переходят случайному игроку;
 //  • владелец был один за столом — стол ликвидируется.
 export async function POST(request) {
@@ -42,39 +44,33 @@ export async function POST(request) {
 
     const isOwner = Number(currentTable.creator_id) === numericUserId
 
-    // 1. Досрочное завершение партии, если выходит «живой» игрок
+    // 1. Явный выход во время партии = AFK-вылет (та же лестница санкций)
     const { data: gameState } = await supabaseAdmin
       .from('game_states')
       .select('*')
       .eq('table_id', tableId)
       .maybeSingle()
 
-    let aborted = false
+    let afk = false
+    let gameStatus = gameState?.status || null
+
     if (gameState && gameState.status === 'playing') {
       const hand = (gameState.hands || {})[String(numericUserId)] || []
       const inGame = (gameState.turn_order || []).map(Number).includes(numericUserId)
+      const alreadyOut = [...(gameState.afk_ids || []), ...(gameState.folded_ids || [])]
+        .map(Number)
+        .includes(numericUserId)
 
       // Наблюдатель (уже вышел из партии) просто покидает стол — игра идёт дальше.
-      if (inGame && hand.length > 0) {
-        const { state: abortedState } = abortGame(gameState, { loserIds: [numericUserId] })
+      if (inGame && hand.length > 0 && !alreadyOut) {
+        const { state: afkState } = forceAfk(gameState, numericUserId)
 
-        await supabaseAdmin
-          .from('game_states')
-          .update({
-            status: 'finished',
-            loser_id: abortedState.loser_id,
-            loser_ids: abortedState.loser_ids,
-            winner_id: abortedState.winner_id,
-            winner_ids: abortedState.winner_ids,
-            placement: null,
-            even_split: true,
-            turn_deadline: null,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('table_id', tableId)
+        await persistGameState(tableId, afkState, gameState)
 
-        await settleGame(tableId, abortedState)
-        aborted = true
+        if (afkState.status === 'finished') await settleGame(tableId, afkState)
+
+        gameStatus = afkState.status
+        afk = true
       }
     }
 
@@ -103,7 +99,7 @@ export async function POST(request) {
 
     // 5. Если партия больше не идёт — стол возвращается в лобби, а оставшиеся
     //    игроки ждут новых участников, чтобы начать следующую игру.
-    const gameStillRunning = gameState && gameState.status === 'playing' && !aborted
+    const gameStillRunning = gameStatus === 'playing'
 
     let updatedTable = {
       ...currentTable,
@@ -122,7 +118,7 @@ export async function POST(request) {
       updatedTable = upd
     }
 
-    return NextResponse.json({ table: updatedTable, deleted: false, newOwnerId, aborted })
+    return NextResponse.json({ table: updatedTable, deleted: false, newOwnerId, afk })
   } catch (err) {
     return NextResponse.json({ error: err.message }, { status: 500 })
   }

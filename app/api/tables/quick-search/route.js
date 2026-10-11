@@ -1,12 +1,22 @@
 import { NextResponse } from 'next/server'
 import { sweepAndLoadLobby } from '@/lib/presence'
+import { authenticateRequest } from '@/lib/telegram-auth'
+import { checkBan } from '@/lib/penalties'
 
 // POST /api/tables/quick-search — подобрать стол с реальными свободными местами.
 // Используем актуальную (пересчитанную) сводку, а не «раздутые» счётчики.
 export async function POST(request) {
   try {
     const body = await request.json().catch(() => ({}))
-    const { bet, mode, deck } = body
+    const { bet, mode, deck, userId, initData } = body
+
+    const auth = authenticateRequest(initData, userId)
+    if (auth.error) {
+      return NextResponse.json({ error: auth.error }, { status: 401 })
+    }
+
+    const ban = await checkBan(auth.userId)
+    if (ban) return NextResponse.json({ error: ban.error }, { status: 403 })
 
     const { tables } = await sweepAndLoadLobby()
 

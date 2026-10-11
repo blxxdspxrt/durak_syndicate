@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase-admin'
 import { authenticateRequest } from '@/lib/telegram-auth'
 import { serializeForViewer } from '@/lib/game-serializer'
+import { applyServerTimeout } from '@/lib/game-persist'
 
 // ============================================================================
 // GET /api/games/state/:id?userId=<id>&initData=<telegram initData>
@@ -9,7 +10,9 @@ import { serializeForViewer } from '@/lib/game-serializer'
 // Отдаёт игровое состояние игроку, сидящему за столом, СКРЫВАЯ секретные данные:
 //   • колода — только количество (deck_count), порядок карт не покидает сервер;
 //   • руки других игроков — только количество карт.
-// Это единственный легальный способ клиента узнать состояние игры.
+// Перед отдачей выполняется «ленивая» проверка просрочки: если время хода
+// вышло, сервер сам применит авто-действие/AFK-вылет и только потом ответит.
+// Это делает партию устойчивой к потерянным пакетам на мобильной сети.
 // ============================================================================
 
 export async function GET(request, context) {
@@ -50,7 +53,10 @@ export async function GET(request, context) {
     if (error) throw error
     if (!gameState) return NextResponse.json({ gameState: null })
 
-    return NextResponse.json({ gameState: serializeForViewer(gameState, auth.userId) })
+    // «Ленивая» проверка просрочки: сервер сам применит таймаут, если время вышло
+    const { gameState: fresh } = await applyServerTimeout(tableId, gameState)
+
+    return NextResponse.json({ gameState: serializeForViewer(fresh, auth.userId) })
   } catch (err) {
     console.error('[GAME STATE ERROR]', err)
     return NextResponse.json({ error: err.message }, { status: 500 })

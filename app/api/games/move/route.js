@@ -4,38 +4,7 @@ import { applyMove } from '@/lib/game-engine'
 import { settleGame } from '@/lib/game-settle'
 import { authenticateRequest } from '@/lib/telegram-auth'
 import { serializeForViewer } from '@/lib/game-serializer'
-
-// Поля игрового состояния, которые сохраняются после хода.
-const PERSIST_FIELDS = [
-  'deck',
-  'hands',
-  'table_cards',
-  'discard',
-  'attacker_id',
-  'defender_id',
-  'phase',
-  'status',
-  'winner_id',
-  'loser_id',
-  'winner_ids',
-  'loser_ids',
-  'turn_deadline',
-  'mode',
-  'teams',
-  'finish_order',
-  'placement',
-  'even_split',
-]
-
-// Собираем patch только из тех колонок, что реально есть в БД
-// (чтобы код не падал, если миграция ещё не применена).
-function buildUpdate(newState, template) {
-  const patch = { updated_at: new Date().toISOString() }
-  for (const field of PERSIST_FIELDS) {
-    if (field in template) patch[field] = newState[field]
-  }
-  return patch
-}
+import { buildGamePatch, applyServerTimeout } from '@/lib/game-persist'
 
 // POST: обработка хода игрока (attack / defend / transfer / take / bito).
 // Вся валидация правил выполняется в game-engine (чистые функции).
@@ -81,9 +50,21 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Вы не за этим столом' }, { status: 403 })
     }
 
-    // 4. Применяем ход через движок. Движок сам проверяет:
+    // 4. Сначала «ленивая» проверка просрочки: если время хода уже истекло,
+    //    сервер сам применит авто-действие или AFK-вылет.
+    const { gameState: fresh } = await applyServerTimeout(tableId, gameState)
+
+    if (fresh.status === 'finished') {
+      return NextResponse.json({
+        success: true,
+        gameState: serializeForViewer(fresh, auth.userId),
+        note: 'Партия завершена: время хода истекло',
+      })
+    }
+
+    // 5. Применяем ход через движок. Движок сам проверяет:
     //    очередь хода, наличие карты в руке, правила атаки/защиты/перевода и т.д.
-    const { state: newState, error: moveError } = applyMove(gameState, {
+    const { state: newState, error: moveError } = applyMove(fresh, {
       userId: auth.userId,
       action,
       card,
@@ -94,17 +75,17 @@ export async function POST(request) {
       return NextResponse.json({ error: moveError }, { status: 400 })
     }
 
-    // 5. Сохраняем обновлённое состояние
+    // 6. Сохраняем обновлённое состояние
     const { data: updated, error: updateErr } = await supabaseAdmin
       .from('game_states')
-      .update(buildUpdate(newState, gameState))
+      .update(buildGamePatch(newState, gameState))
       .eq('table_id', tableId)
       .select()
       .single()
 
     if (updateErr) throw updateErr
 
-    // 6. Если игра завершена — рассчитываем ставку (защита от двойного начисления в settleGame)
+    // 7. Если игра завершена — рассчитываем ставку (защита от двойного начисления в settleGame)
     if (newState.status === 'finished') {
       await settleGame(tableId, newState)
     }

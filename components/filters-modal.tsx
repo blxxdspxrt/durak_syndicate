@@ -4,6 +4,9 @@ import { useState } from 'react'
 import { Shield, Swords, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
+// Варианты времени на ход (синхронизированы с TURN_OPTIONS в lib/game-engine.js)
+const TURN_OPTIONS = [15, 30, 45, 60]
+
 export function FiltersModal({
   mode,
   defaultGameMode = 'Синдикат',
@@ -82,6 +85,31 @@ export function FiltersModal({
             ))}
           </div>
         </div>
+
+        {/* Время на ход — только при создании стола */}
+        {mode === 'create' && (
+          <div className="space-y-1.5">
+            <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+              Время на ход
+            </label>
+            <div className="grid grid-cols-4 gap-2">
+              {TURN_OPTIONS.map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setTurnTime(t)}
+                  className={`h-8 rounded-lg border text-xs font-semibold ${
+                    turnTime === t
+                      ? 'border-sky-500 bg-sky-500/20 text-sky-300'
+                      : 'border-white/10 bg-slate-950/60 text-slate-400'
+                  }`}
+                >
+                  {t}с
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         <Button
           onClick={() => {

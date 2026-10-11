@@ -26,8 +26,8 @@ async function loadModule(relPath) {
 
 const engine = await loadModule('lib/game-engine.js')
 const economy = await loadModule('lib/economy.js')
-const { applyMove, applyTimeout, shouldAutoBito, canContinueBout, abortGame, placementOrder } = engine
-const { computeSettlement } = economy
+const { applyMove, applyTimeout, shouldAutoBito, canContinueBout, abortGame, placementOrder, reconcileTimeout } = engine
+const { computeSettlement, leaveSanction } = economy
 
 // ---------------------------------------------------------------------------
 // Мини-фреймворк
@@ -202,38 +202,109 @@ console.log('\n2. Авто-«Бито» после отбоя')
 }
 
 // ---------------------------------------------------------------------------
-// 3. Таймаут
+// 3. Таймаут: 1-я просрочка = авто-действие, 2-я подряд = AFK-вылет
 // ---------------------------------------------------------------------------
-console.log('\n3. Таймаут хода (партия завершается, виновный проигрывает)')
+console.log('\n3. Таймаут (2 просрочки подряд = вылет)')
 
 {
+  // Защитник не отбился → авто-«Взял», партия продолжается
   const past = new Date(Date.now() - 60000).toISOString()
   const s = baseState({
-    hands: { '1': [card('9s')], '2': [card('7s')] },
+    hands: { '1': [card('9s')], '2': [card('7s'), card('10c')] },
     table_cards: [{ attack: card('6s'), defend: null }],
     turn_deadline: past,
   })
   const res = applyTimeout(s)
-  check('таймаут → партия завершена', res.state?.status === 'finished')
+  check('1-я просрочка: партия НЕ завершена', res.state?.status === 'playing')
+  check('авто-«Взял»: защитник получил карты', (res.state?.hands?.['2'] || []).length >= 3)
   check(
-    'проиграл не успевший (защитник 2)',
-    (res.state?.loser_ids || []).map(Number).includes(2),
-    JSON.stringify(res.state?.loser_ids)
+    'счётчик просрочек игрока 2 = 1',
+    Number(res.state?.timeout_streak?.['2']) === 1,
+    JSON.stringify(res.state?.timeout_streak)
   )
-  check('приз делится поровну (even_split)', res.state?.even_split === true)
 }
 
 {
+  // Атакующий не завёл → «Пас», ход переходит дальше
   const past = new Date(Date.now() - 60000).toISOString()
   const s = baseState({
-    hands: { '1': [card('9s')], '2': [card('7s')] },
+    hands: { '1': [card('9s')], '2': [card('7s'), card('10c')] },
     table_cards: [],
+    turn_order: [1, 2],
     attacker_id: 1,
     defender_id: 2,
     turn_deadline: past,
   })
   const res = applyTimeout(s)
-  check('пустой стол + таймаут → проиграл атакующий 1', (res.state?.loser_ids || []).map(Number).includes(1))
+  check('пустой стол: партия продолжается', res.state?.status === 'playing')
+  check('«Пас»: заводит игрок 2', Number(res.state?.attacker_id) === 2)
+  check('счётчик просрочек игрока 1 = 1', Number(res.state?.timeout_streak?.['1']) === 1)
+}
+
+{
+  // 2-я просрочка ПОДРЯД → AFK-вылет, остальные доигрывают
+  const past = new Date(Date.now() - 60000).toISOString()
+  const s = baseState({
+    hands: { '1': [card('9s')], '2': [card('7s'), card('10c')], '3': [card('8h')] },
+    table_cards: [{ attack: card('6s'), defend: null }],
+    turn_order: [1, 2, 3],
+    attacker_id: 1,
+    defender_id: 2,
+    timeout_streak: { '2': 1 },
+    turn_deadline: past,
+  })
+  const res = applyTimeout(s)
+  check('2-я просрочка: игрок 2 в afk_ids', (res.state?.afk_ids || []).map(Number).includes(2), JSON.stringify(res.state?.afk_ids))
+  check('карты выбывшего ушли в отбой', (res.state?.hands?.['2'] || []).length === 0)
+  check('партия продолжается (осталось трое)', res.state?.status === 'playing')
+  check('счётчик просрочек сброшен', !res.state?.timeout_streak?.['2'])
+}
+
+{
+  // Реальный ход сбрасывает счётчик просрочек
+  const s = baseState({
+    hands: { '1': [card('9s')], '2': [card('7s'), card('10c')] },
+    table_cards: [],
+    timeout_streak: { '1': 1 },
+  })
+  const res = applyMove(s, { userId: 1, action: 'attack', card: card('9s') })
+  check('ход игрока сбрасывает его просрочки', !res.state?.timeout_streak?.['1'])
+}
+
+{
+  // 1v1 (Вариант Б): AFK → партия сразу завершается, оставшийся победил
+  const past = new Date(Date.now() - 60000).toISOString()
+  const s = baseState({
+    hands: { '1': [card('9s'), card('10s')], '2': [card('7s')] },
+    table_cards: [{ attack: card('6s'), defend: null }],
+    timeout_streak: { '2': 1 },
+    turn_deadline: past,
+  })
+  const res = applyTimeout(s)
+  check('1v1 AFK → партия завершена', res.state?.status === 'finished')
+  check('победитель — игрок 1', (res.state?.winner_ids || []).map(Number).includes(1))
+  check('выбывший — игрок 2', (res.state?.afk_ids || []).map(Number).includes(2))
+}
+
+{
+  // 2×2 Синдикат (Вариант Б): AFK одного → вылетает вся команда, партия завершается
+  const past = new Date(Date.now() - 60000).toISOString()
+  const s = baseState({
+    mode: 'Синдикат',
+    teams: [1, 1, 2, 2],
+    turn_order: [1, 2, 3, 4],
+    hands: { '1': [], '2': [card('7s')], '3': [card('8s')], '4': [card('9s')] },
+    table_cards: [],
+    attacker_id: 2,
+    defender_id: 3,
+    timeout_streak: { '2': 1 },
+    turn_deadline: past,
+  })
+  const res = applyTimeout(s)
+  check('2×2: партия завершена', res.state?.status === 'finished')
+  check('выбыл игрок 2 (AFK)', (res.state?.afk_ids || []).map(Number).includes(2))
+  check('напарник 1 тоже выбыл (folded)', (res.state?.folded_ids || []).map(Number).includes(1))
+  check('победила команда 2', [3, 4].every((u) => (res.state?.winner_ids || []).map(Number).includes(u)))
 }
 
 // ---------------------------------------------------------------------------
@@ -383,6 +454,129 @@ console.log('\n5. Наблюдатели и раскладка мест')
   check('1-е место — игрок 1', Number(places[0][0]) === 1)
   check('2-е место — игрок 2', Number(places[1][0]) === 2)
   check('последнее место — дурак (3)', Number(places[2][0]) === 3)
+}
+
+// ---------------------------------------------------------------------------
+// 7. «Ленивая» серверная валидация + санкции + экономика выбывших
+// ---------------------------------------------------------------------------
+console.log('\n7. Серверная проверка просрочки, санкции и экономика выбывших')
+
+{
+  // Дедлайн ещё не прошёл → состояние не меняется
+  const future = new Date(Date.now() + 60000).toISOString()
+  const s = baseState({ turn_deadline: future })
+  const { changed } = reconcileTimeout(s)
+  check('дедлайн не истёк → изменений нет', changed === false)
+
+  // Дедлайн прошёл → сервер сам применяет просрочку
+  const past = new Date(Date.now() - 60000).toISOString()
+  const s2 = baseState({
+    hands: { '1': [card('9s')], '2': [card('7s'), card('10c')] },
+    table_cards: [{ attack: card('6s'), defend: null }],
+    turn_deadline: past,
+  })
+  const { changed: changed2, state: after } = reconcileTimeout(s2)
+  check('дедлайн истёк → сервер применил просрочку', changed2 === true)
+  check('просрочка = авто-«Взял»', (after?.hands?.['2'] || []).length >= 3)
+}
+
+{
+  // Классика на 4: игрок 3 AFK → живых трое, приз по таблице на 3 места
+  const state = baseState({
+    turn_order: [1, 2, 3, 4],
+    placement: [[1], [2], [4], [3]],
+    afk_ids: [3],
+  })
+  const { pot, rake, net, results } = computeSettlement(state, 1000)
+  const prize = (uid) => results.find((r) => r.userId === uid).prize
+  const delta = (uid) => results.find((r) => r.userId === uid).dollars
+  const result = (uid) => results.find((r) => r.userId === uid).result
+
+  check('пот = 4 × 1000', pot === 4000)
+  check('рейк = 320', rake === 320)
+  check('чистый фонд = 3680', net === 3680)
+  check('1 место: 70% = 2576', prize(1) === 2576, String(prize(1)))
+  check('2 место: 30% = 1104', prize(2) === 1104, String(prize(2)))
+  check('дурак (4) получает 0', prize(4) === 0)
+  check('AFK (3) получает 0', prize(3) === 0)
+  check('AFK теряет весь бай-ин', delta(3) === -1000, String(delta(3)))
+  check('AFK помечен как afk', result(3) === 'afk')
+  const sum = results.reduce((a, r) => a + r.dollars, 0)
+  check('zero-sum (минус рейк и округление)', sum <= -rake && sum > -(rake + 8), String(sum))
+}
+
+{
+  // Синдикат 2×2: команда вылетела (AFK 2 + напарник 1) → соперники забирают фонд,
+  // напарнику возвращается 75% бай-ина (из фонда, zero-sum сохраняется)
+  const state = baseState({
+    mode: 'Синдикат',
+    teams: [1, 1, 2, 2],
+    turn_order: [1, 2, 3, 4],
+    placement: [[3, 4], [1, 2]],
+    afk_ids: [2],
+    folded_ids: [1],
+  })
+  const { results } = computeSettlement(state, 1000)
+  const prize = (uid) => results.find((r) => r.userId === uid).prize
+  const delta = (uid) => results.find((r) => r.userId === uid).dollars
+  const inf = (uid) => results.find((r) => r.userId === uid).influence
+
+  check('2×2: напарник вернул 75% = 750', prize(1) === 750, String(prize(1)))
+  check('2×2: напарник чистыми -250', delta(1) === -250)
+  check('2×2: напарник без штрафа Влияния', inf(1) === 0)
+  check('2×2: победители делят 2930 (по 1465)', prize(3) === 1465 && prize(4) === 1465, String(prize(3)))
+  check('2×2: выбывший теряет весь бай-ин', delta(2) === -1000)
+  check('2×2: zero-sum ровно -рейк', results.reduce((a, r) => a + r.dollars, 0) === -320)
+}
+
+{
+  // Синдикат 2×2×2: команда 3 вылетела, двое доигрывают по стандартной таблице
+  const state = baseState({
+    mode: 'Синдикат',
+    teams: [1, 1, 2, 2, 3, 3],
+    turn_order: [1, 2, 3, 4, 5, 6],
+    placement: [[1, 2], [3, 4], [5, 6]],
+    afk_ids: [5],
+    folded_ids: [6],
+  })
+  const { results } = computeSettlement(state, 1000)
+  const prize = (uid) => results.find((r) => r.userId === uid).prize
+  const inf = (uid) => results.find((r) => r.userId === uid).influence
+
+  check('2×2×2: 1-й синдикат по 1932 каждому', prize(1) === 1932 && prize(2) === 1932, String(prize(1)))
+  check('2×2×2: 2-й синдикат по 828 каждому', prize(3) === 828 && prize(4) === 828, String(prize(3)))
+  check('2×2×2: напарник выбывшего — $0', prize(6) === 0)
+  check('2×2×2: напарнику мягкий -8 Влияния', inf(6) === -8, String(inf(6)))
+  check('2×2×2: самого выбывшего штрафует settleGame (здесь 0)', inf(5) === 0)
+}
+
+{
+  // Лестница санкций
+  const first = leaveSanction({ mode: 'Классический', playerCount: 4, warned: false, streak: 0 })
+  check('первый лив в жизни → только предупреждение', first.level === 'warning' && first.elo === 0 && first.banMinutes === 0)
+
+  const half = leaveSanction({ mode: 'Классический', playerCount: 4, warned: true, streak: 1 })
+  check('1-й лив за сутки → половина ELO (-19)', half.elo === -19, String(half.elo))
+
+  const full = leaveSanction({ mode: 'Классический', playerCount: 4, warned: true, streak: 2 })
+  check('2-й лив → полный ELO дурака (-38)', full.elo === -38, String(full.elo))
+  check('2-й лив без бана', full.banMinutes === 0)
+
+  const third = leaveSanction({ mode: 'Классический', playerCount: 4, warned: true, streak: 3 })
+  check('3-й лив → -38 × 1.15 = -44', third.elo === -44, String(third.elo))
+  check('3-й лив → бан 15 мин', third.banMinutes === 15)
+
+  const fourth = leaveSanction({ mode: 'Классический', playerCount: 4, warned: true, streak: 4 })
+  check('4-й лив → бан 30 мин', fourth.banMinutes === 30, String(fourth.banMinutes))
+
+  const fifth = leaveSanction({ mode: 'Классический', playerCount: 4, warned: true, streak: 5 })
+  check('5-й лив → бан 60 мин (удвоение)', fifth.banMinutes === 60, String(fifth.banMinutes))
+
+  const syn2 = leaveSanction({ mode: 'Синдикат', playerCount: 4, syndicateCount: 2, warned: true, streak: 2 })
+  check('Синдикат 2×2: афкашер -35 Влияния, ELO не трогаем', syn2.influence === -35 && syn2.elo === 0, String(syn2.influence))
+
+  const syn3 = leaveSanction({ mode: 'Синдикат', playerCount: 6, syndicateCount: 3, warned: true, streak: 3 })
+  check('Синдикат 2×2×2, 3-й лив: -45 × 1.15 = -52', syn3.influence === -52, String(syn3.influence))
 }
 
 // ---------------------------------------------------------------------------

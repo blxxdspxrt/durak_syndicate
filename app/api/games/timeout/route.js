@@ -1,41 +1,18 @@
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase-admin'
-import { applyTimeout } from '@/lib/game-engine'
-import { settleGame } from '@/lib/game-settle'
 import { authenticateRequest } from '@/lib/telegram-auth'
 import { serializeForViewer } from '@/lib/game-serializer'
+import { applyServerTimeout } from '@/lib/game-persist'
 
-const PERSIST_FIELDS = [
-  'deck',
-  'hands',
-  'table_cards',
-  'discard',
-  'attacker_id',
-  'defender_id',
-  'phase',
-  'status',
-  'winner_id',
-  'loser_id',
-  'winner_ids',
-  'loser_ids',
-  'turn_deadline',
-  'mode',
-  'teams',
-  'finish_order',
-  'placement',
-  'even_split',
-]
-
-function buildUpdate(newState, template) {
-  const patch = { updated_at: new Date().toISOString() }
-  for (const field of PERSIST_FIELDS) {
-    if (field in template) patch[field] = newState[field]
-  }
-  return patch
-}
-
-// POST: проверка таймера хода. Вызывается только игроком за столом.
-// Если время вышло — применяется авто-действие и, при завершении, расчёт ставки.
+// ============================================================================
+// POST /api/games/timeout — «ускоритель» проверки времени хода.
+// ============================================================================
+// Клиент лишь СООБЩАЕТ серверу, что пора проверить время. Все решения принимает
+// сервер (см. applyServerTimeout → reconcileTimeout): если дедлайн не прошёл —
+// ничего не меняется, если прошёл — применяется авто-действие или AFK-вылет.
+// Поэтому запрос идемпотентен: его можно слать повторно (ретраи) без риска
+// задвоить действие.
+// ============================================================================
 export async function POST(request) {
   try {
     const body = await request.json()
@@ -75,30 +52,12 @@ export async function POST(request) {
       return NextResponse.json({ success: true, skipped: true })
     }
 
-    const deadline = gameState.turn_deadline ? new Date(gameState.turn_deadline).getTime() : 0
-    if (!deadline || Date.now() < deadline) {
-      return NextResponse.json({ success: true, skipped: true })
-    }
-
-    // Время вышло — применяем авто-действие
-    const { state: newState } = applyTimeout(gameState)
-
-    const { data: updated, error: updErr } = await supabaseAdmin
-      .from('game_states')
-      .update(buildUpdate(newState, gameState))
-      .eq('table_id', tableId)
-      .select()
-      .single()
-
-    if (updErr) throw updErr
-
-    if (newState.status === 'finished') {
-      await settleGame(tableId, newState)
-    }
+    const { gameState: fresh, changed } = await applyServerTimeout(tableId, gameState)
 
     return NextResponse.json({
       success: true,
-      gameState: serializeForViewer(updated, auth.userId),
+      applied: changed,
+      gameState: serializeForViewer(fresh, auth.userId),
     })
   } catch (err) {
     console.error('[GAME TIMEOUT ERROR]', err)
